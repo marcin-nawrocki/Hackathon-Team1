@@ -30,7 +30,8 @@ No configuration needed — copy one of the prompts below into chat. You get a s
 | Daily standup prep | `Prepare a daily standup summary` |
 | Include Test tickets in SP | `Sprint health include tests` |
 | Save report to file | Add: `Save the report to a file` |
-| Publish to Teams | Add: `Post the report to Teams` (requires [Teams setup](#teams-publish-setup-one-time)) |
+| Publish to Teams (summary card) | Add: `Post the report to Teams` (requires [Teams setup](#teams-publish-setup-one-time)) |
+| Publish FULL report to Teams | Add: `Post the full report to Teams` (uses [teams-card-full.json](templates/teams-card-full.json)) |
 
 **Note:** By default, Zephyr **Test** issues are excluded from story-point metrics (they often duplicate parent Stories). See [Scope configuration](#scope-configuration). Say **"include tests"** to include them.
 
@@ -486,17 +487,33 @@ The workflow expects a Teams message envelope with an Adaptive Card attachment:
 
 Run **only** when the user asks to post/publish/send the report to Teams (e.g. "Post the report to Teams"). Do not publish automatically after Step 7.
 
+**Two card variants:**
+
+| Variant | When to use | Template |
+|---------|-------------|----------|
+| **Summary** (default) | User says "Post the report to Teams" without "full" / "pełny" | [`templates/teams-card.json`](templates/teams-card.json) |
+| **Full** | User says "Post the **full** report to Teams" (or Polish *pełny*) | [`templates/teams-card-full.json`](templates/teams-card-full.json) |
+
 ### 8a. Resolve webhook URL
 
 1. Read `.cursor/skills/sprint-health/teams-config.json` and parse `webhookUrl`.
 2. If the file is missing, tell the user to copy [teams-config.example.json](teams-config.example.json) to `teams-config.json` and complete [Teams publish setup](#teams-publish-setup-one-time). Do not guess or hardcode a URL.
 3. If `webhookUrl` is empty or still contains the placeholder `YOUR-POWER-AUTOMATE-WEBHOOK-URL-HERE`, stop and ask the user to paste the real URL.
 
-### 8b. Build the summary Adaptive Card
+### 8b. Build the Adaptive Card
 
-Load [`templates/teams-card.json`](templates/teams-card.json) and substitute placeholders from the Step 7 report metrics.
+Load the template selected above and substitute placeholders from the Step 7 report metrics.
 
 **Goal theme rows:** The template contains one example goal-row `ColumnSet` (the second `ColumnSet` after the header row). Before substitution, **clone that `ColumnSet` once per goal theme** from Step 6b so each theme gets its own row. Replace per-row placeholders (`{{themeName}}`, `{{themeDoneSP}}`, `{{themeTotalSP}}`, `{{themePct}}`, `{{themeVerdictEmoji}}`) with that theme's values. Remove the template row after cloning if you built all rows from scratch, or substitute the single template row when there is exactly one theme.
+
+**Narrative bodies (full card only):** Compose the four multiline placeholders from the Step 7 report sections. Join lines with `\n\n` (double newline) so Teams renders separate paragraphs. Escape any double quotes in the composed text for valid JSON. Use `\uXXXX` for emoji in JSON if needed.
+
+| Placeholder | Source (Step 7 section) |
+|-------------|-------------------------|
+| `{{sinceYesterdayBody}}` | **Since Yesterday** — opening sentence, then ✅ Completed, ▶ Moved forward, ◀ Moved backward/reopened, ➕/➖ scope, **Net flow** (one line each; "None" when empty) |
+| `{{agingBody}}` | **Aging / Stuck Tickets** — bottleneck diagnosis sentence, then one line per flagged ticket: `KEY — summary (SP) — status — idle since DATE`; or `No aging issues detected.` |
+| `{{estimationBody}}` | **Estimation Notes** — Unestimated, Mid-sprint changes, Calibration (and re-estimate proposals if present) |
+| `{{recommendationsBody}}` | **Recommendations** — numbered lines 1–5 from the report |
 
 | Placeholder | Source |
 |-------------|--------|
@@ -540,7 +557,10 @@ Load [`templates/teams-card.json`](templates/teams-card.json) and substitute pla
 | `{{expectedComplete}}` | Expected % complete (rounded) |
 | `{{actualComplete}}` | Actual % complete (rounded) |
 
-**Scope (summary version):** header + justification, per-theme goal SP table, goal roll-up, Progress Summary, and Burndown. Do **not** add Since Yesterday, Aging, Estimation, Recommendations, or action buttons yet — those come in a later card iteration.
+**Scope by variant:**
+
+- **Summary card:** header + justification, per-theme goal SP table, goal roll-up, Progress Summary, and Burndown only.
+- **Full card:** everything in the summary card **plus** scope line, Since Yesterday, Aging, Estimation Notes, and Recommendations (via the four narrative placeholders above). No action buttons.
 
 Perform substitution **inline** in the agent response (string replace on the JSON). Do not write a one-off script or temp file for substitution unless the user explicitly requests a saved card file.
 
@@ -554,13 +574,14 @@ Invoke-RestMethod -Uri $config.webhookUrl -Method Post -ContentType 'application
 
 ### 8d. Confirm to user
 
-After a successful POST, confirm in chat: *Posted sprint health card to Teams.* On failure, report the HTTP status/error and suggest re-running the [verify step](#3-verify-the-webhook).
+After a successful POST, confirm in chat: *Posted sprint health card to Teams* (or *Posted full sprint health card to Teams* when using the full template). On failure, report the HTTP status/error and suggest re-running the [verify step](#3-verify-the-webhook).
 
 ### Notes
 
 - Publishing is **opt-in** — normal report runs are unaffected.
 - The card is **static/informational**; interactive buttons (`Action.Submit`, `Action.Execute`) require a bot or response-waiting flow and are out of scope for this step.
-- Since Yesterday, Aging, Estimation, Recommendations, and JIRA board link buttons are deferred to a follow-up card iteration.
+- Default Teams publish uses the **summary** card; request **full** explicitly for the complete report in Teams.
+- JIRA board link buttons remain out of scope for both card variants.
 
 ---
 
@@ -577,4 +598,5 @@ After a successful POST, confirm in chat: *Posted sprint health card to Teams.* 
 - JQL snippets, changelog parsing, SP-to-time scale, burndown math, full report template: [reference.md](reference.md)
 - Large-sprint metrics parser (fallback): [scripts/sprint_metrics.py](scripts/sprint_metrics.py)
 - Teams Adaptive Card template (summary): [templates/teams-card.json](templates/teams-card.json)
+- Teams Adaptive Card template (full report): [templates/teams-card-full.json](templates/teams-card-full.json)
 - Teams webhook config template: [teams-config.example.json](teams-config.example.json) → copy to `teams-config.json` (gitignored)
