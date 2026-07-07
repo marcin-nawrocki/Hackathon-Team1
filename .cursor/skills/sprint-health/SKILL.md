@@ -17,7 +17,7 @@ Generates a sprint health report for **board 231** (The A Team) using the Atlass
 
 ## How to use (example prompts)
 
-No configuration needed — copy one of the prompts below into chat. You get a single report with **RAG status**, sprint goal progress, burndown, what changed since yesterday, stuck tickets, and estimation proposals.
+No configuration needed — copy one of the prompts below into chat. You get a single report with **dual RAG status** (overall + sprint goal), per-theme goal progress, burndown, since-yesterday flow (including backward/reopened + Net flow), stuck tickets (idle since), estimation notes, and prioritized recommendations.
 
 | You want… | Write this |
 |-----------|------------|
@@ -184,10 +184,12 @@ No local storage. Reconstruct "since yesterday" from JIRA changelog.
 ### 4a. Find recently changed issues
 
 ```
-jql: project = SCL AND sprint = <activeSprintId> AND issuetype != Test AND status CHANGED AFTER -1d
+jql: project = SCL AND sprint = <activeSprintId> AND issuetype != Test AND status CHANGED AFTER startOfDay(-1)
 maxResults: 50
 fields: ["summary", "status", "customfield_10200", "issuetype"]
 ```
+
+Use `startOfDay(-1)` (not bare `-1d`) — the rolling 24h window misses completions from the previous calendar day.
 
 If the combined `status CHANGED OR sprint CHANGED` query fails, split into separate queries (status-only, sprint-only). Omit `issuetype != Test` when user requested include tests.
 
@@ -207,7 +209,7 @@ getJiraIssue
 
 ### 4c. Parse changelog entries since previous working day
 
-Use the cutoff: **start of previous calendar day** (00:00 local) or last business day if the user specifies.
+Use the cutoff: **`startOfDay(-1)`** in JQL (aligns with start of previous calendar day 00:00 local). Do not use bare `-1d` alone — it misses earlier completions from the previous day. For changelog filtering, use the same cutoff: `history.created >= cutoffISO`.
 
 For each `changelog.histories` entry where `created >= cutoff`:
 
@@ -215,18 +217,20 @@ For each `changelog.histories` entry where `created >= cutoff`:
 |-------------|-------|----------------|
 | Status transition | `status` | `{key, from, to, when, author}` |
 | SP completed | `status` → Done | SP value of the issue |
+| Moved forward | `status` | To Do → In Progress, or forward in workflow (e.g. → In-Review, → QA) |
+| Moved backward / reopened | `status` | In Progress → To Do/Open, Review/QA → Open, Done → reopened |
 | Scope added | `Sprint` | Issue added to sprint (from empty or different sprint) |
 | Scope removed | `Sprint` | Issue removed from sprint |
 | SP changed | `Story Points` / `customfield_10200` | Old → new value |
 | Blocker added | `Flagged` / `labels` | New blocker or impediment label |
 
-Summarize into:
+Summarize into (all required in report — see [reference.md](reference.md) template):
 
-- **Completed yesterday:** list of keys that transitioned to Done (+ SP)
-- **Started yesterday:** keys that moved from To Do → In Progress
-- **Scope changes:** keys added/removed from sprint (+ SP impact)
-- **SP completed yesterday:** sum of SP for issues moved to Done
-- **Net SP change:** scope added SP − scope removed SP − SP completed
+- **✅ Completed:** keys that transitioned to Done (+ SP sum)
+- **▶ Moved forward:** keys that advanced in workflow (started, → review, → QA)
+- **◀ Moved backward / reopened:** keys that regressed (In-Progress→Open, QA→Open, Done→reopened) (+ SP sum regressed)
+- **➕ Scope added / ➖ Scope removed:** keys added/removed from sprint (+ SP impact)
+- **Net flow:** one-line summary — `+{spCompleted} SP done vs ~{spRegressed} SP regressed → {assessment}`
 
 See [reference.md](reference.md) for detailed changelog parsing rules.
 
@@ -251,7 +255,7 @@ For each **scoped** issue (Test excluded by default) with status category **In P
 | No status change for ≥ 2 business days while In Progress | Stale |
 | Story Points = 0/null and In Progress > 1 business day | Unestimated risk |
 
-List flagged issues with: key, summary, assignee, SP, days in current status, expected duration, ratio, recommendation.
+List flagged issues with: key, summary, SP, status, **idle since** (date of last status change or `updated` if no changelog). Add a one-sentence bottleneck diagnosis (e.g. review/QA queue). Ratio/assignee are optional — prefer the idle-since table from [reference.md](reference.md).
 
 ---
 
@@ -343,24 +347,34 @@ Example inference:
 
 ### 6b. Compute goal progress (mandatory)
 
-Always quantify progress toward the sprint goal:
+Always quantify progress toward the sprint goal. Use emoji RAG (🟢/🟡/🔴) per theme and for overall goal verdict.
 
-1. **Identify goal-linked issues** — if an explicit goal exists, map it to Epics/issues by keyword match or dominant Epic from 6a; otherwise use the dominant Epic + top high-priority issues from 6a. Use the **scoped** issue set (Test excluded by default).
+**When `sprint.goal` has multiple lines or bullets** (multi-part goal):
+
+1. Split goal text into **themes** (one per line/bullet).
+2. For each theme, map to Epics/issues by keyword match (e.g. "Sykes" → Epic SCL-3875, "Adyen" → SCL-13248/SCL-12058, "VRBO" → SCL-12933).
+3. Per theme: sum `themeTotalSP`, `themeDoneSP`, compute `themePct`, assign theme verdict (same thresholds below).
+4. Render the **per-theme table** from [reference.md](reference.md).
+5. **Goal roll-up:** aggregate all theme SP → overall `goalPctComplete` vs `expectedPct`; overall goal verdict = worst theme verdict.
+
+**Single-goal or inferred goal:**
+
+1. **Identify goal-linked issues** — keyword match to explicit goal, or dominant Epic + top high-priority issues from 6a. Use the **scoped** issue set (Test excluded by default).
 2. **Sum goal SP** — total SP of goal-linked scoped issues in the sprint.
 3. **Sum goal Done SP** — SP of goal-linked scoped issues with status category = Done.
 4. **Goal % complete** = `goalDoneSP / goalTotalSP × 100` (if goalTotalSP = 0, use issue count).
-5. **Goal verdict** — one line: compare goal % complete vs expected % complete (`daysElapsed / sprintLength × 100`):
-   - Goal % ≥ expected % → *On track for goal*
-   - Goal % within 10 pp of expected → *At risk for goal*
-   - Goal % > 10 pp behind expected → *Off track for goal*
+5. **Goal verdict** — compare goal % complete vs expected % complete (`daysElapsed / sprintLength × 100`):
+   - Goal % ≥ expected % → 🟢 *On track for goal*
+   - Goal % within 10 pp of expected → 🟡 *At risk for goal*
+   - Goal % > 10 pp behind expected → 🔴 *Off track for goal*
 
-Report: goal statement, goal-linked Epic/issues, goal Done/total SP, goal %, and verdict.
+Report: goal statement (bulleted if multi-part), per-theme table when applicable, Goal roll-up line, and overall goal RAG in the header.
 
 ---
 
 ## Step 7: Report with RAG status
 
-Determine overall **RAG status**:
+Determine **two independent RAG statuses** — overall sprint health and sprint goal — each with emoji (🟢 On track / 🟡 At risk / 🔴 Off track). See [reference.md](reference.md) decision matrix.
 
 | Status | Criteria (any triggers the status) |
 |--------|-------------------------------------|
@@ -375,21 +389,22 @@ Determine overall **RAG status**:
 - `underestimatedCount / doneCount > 50%` AND burndown behind → upgrade to **At risk** with note "systematic underestimation detected"
 - `totalSuggestedSPDelta > 15%` of remaining SP → prioritize re-estimation in recommendations
 
-Use the report template from [reference.md](reference.md). Always include:
+Use the report template from [reference.md](reference.md) — it is the **only** output format. Always include:
 
-1. RAG status with one-line justification
-2. Sprint name, dates, days remaining, and **scope line**: `Test (Zephyr) issues excluded — {count} ticket(s), {sp} SP` (or "Tests included" when override active)
-3. **Sprint goal** (explicit or inferred) **and Goal Progress** (goal-linked issues, Done/total SP, goal %, on-track verdict from Step 6b)
-4. Metrics table (SP by category, % complete, burndown, test exclusion summary, optional Test/QA coverage)
-5. Since-yesterday section (completed, started, scope changes)
-6. Aging / stuck tickets table
-7. Estimation accuracy section (summary, re-estimate proposals, completed calibration)
-8. Actionable recommendations (max 5, prioritized; include estimation actions when proposals exist, e.g. "Re-estimate SCL-512 from 5→8 SP"; include goal actions when off track, e.g. "Prioritize SCL-512 to unblock goal")
+1. **Dual RAG header** — `Overall status` and `Sprint goal` (independent) with one-line `>` justification
+2. Sprint name, dates, days remaining/elapsed, and **scope line**: `Test (Zephyr) issues excluded — {count} ticket(s), {sp} SP` (or "Tests included" when override active)
+3. **Sprint Goal & Progress** — bulleted goal + per-theme table when multi-part goal + Goal roll-up line (Step 6b)
+4. **Progress Summary** — SP by category (flag WIP >40%), burndown, test exclusion
+5. **Since Yesterday** — ✅ Completed, ▶ Moved forward, ◀ Moved backward/reopened, ➕/➖ scope, **Net flow** (Step 4)
+6. **Aging / Stuck Tickets** — idle-since table + bottleneck diagnosis sentence
+7. **Estimation Notes** — unestimated count, mid-sprint changes, calibration summary or offer
+8. **Recommendations** — max 5, prioritized (review queue, WIP, goal rescue, estimation)
+9. **Closing offer** — ask to save `sprint-health_SCL_<sprintName>_<YYYY-MM-DD>.md` and/or run full estimation calibration
 
 ### Output
 
-- **Default:** render the report in chat.
-- **Optional:** ask the user if they want the report saved to `sprint-health_SCL_<sprintName>_<YYYY-MM-DD>.md` in the workspace root.
+- **Default:** render the report in chat using the template exactly.
+- **On request:** save to `sprint-health_SCL_<sprintName>_<YYYY-MM-DD>.md` in the workspace root.
 
 ---
 

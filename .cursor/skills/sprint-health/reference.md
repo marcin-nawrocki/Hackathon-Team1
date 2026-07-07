@@ -32,9 +32,11 @@ project = SCL AND sprint = <activeSprintId> AND issuetype = Test
 
 ### Recently changed (day-to-day delta)
 
+Prefer `startOfDay(-1)` over bare `-1d` — the rolling 24h window misses completions from the previous calendar day.
+
 ```jql
 project = SCL AND sprint = <activeSprintId> AND issuetype != Test
-AND status CHANGED AFTER -1d
+AND status CHANGED AFTER startOfDay(-1)
 ```
 
 If combined status/sprint change query fails, run separate queries. Sprint scope changes:
@@ -251,11 +253,11 @@ Look for:
 
 ### Day-to-day cutoff
 
-Default cutoff: **00:00 of previous calendar day** in the user's local timezone.
+Default cutoff: **`startOfDay(-1)`** in JQL — start of previous calendar day in the user's local timezone. Filter changelogs: `history.created >= cutoffISO`.
 
-For "since last standup" requests, use 24h rolling window (`-1d` in JQL aligns with this).
+Do not use bare `-1d` alone for discovery; it is a rolling 24h window and misses earlier completions from the previous day.
 
-Filter: `history.created >= cutoffISO`
+For "since last standup" requests, use 24h rolling window (`-1d` in JQL) only when the user explicitly asks for it.
 
 ---
 
@@ -276,15 +278,31 @@ Filter: `history.created >= cutoffISO`
 
 ### Goal progress (Step 6b — mandatory in report)
 
+**Single-goal sprint:**
+
 ```
 1. goalIssues = issues linked to primaryGoal (keyword match) OR dominantEpic + topIssues
 2. goalTotalSP = sum(storyPoints) of goalIssues
 3. goalDoneSP = sum(storyPoints) of goalIssues where statusCategory = Done
 4. goalPctComplete = goalDoneSP / goalTotalSP * 100
 5. expectedPct = daysElapsed / sprintLength * 100
-6. IF goalPctComplete >= expectedPct → "On track for goal"
-   ELIF goalPctComplete >= expectedPct - 10 → "At risk for goal"
-   ELSE → "Off track for goal"
+6. IF goalPctComplete >= expectedPct → 🟢 On track for goal
+   ELIF goalPctComplete >= expectedPct - 10 → 🟡 At risk for goal
+   ELSE → 🔴 Off track for goal
+```
+
+**Multi-part goal** (when `sprint.goal` contains multiple lines or bullet items):
+
+```
+1. SPLIT goal text into themes (one per line/bullet)
+2. FOR each theme:
+   a. Map to Epics/issues by keyword match (e.g. "Sykes" → Epic SCL-3875, "Adyen" → SCL-13248/SCL-12058, "VRBO" → SCL-12933)
+   b. Sum themeTotalSP, themeDoneSP from mapped scoped issues
+   c. themePct = themeDoneSP / themeTotalSP * 100
+   d. themeVerdict = same thresholds as step 6 above (with emoji)
+3. Goal roll-up: sum all theme SP → goalTotalSP, goalDoneSP → goalPctComplete
+4. Overall goal verdict = worst theme verdict (🔴 > 🟡 > 🟢)
+5. Render per-theme table + one-line Goal roll-up comparing goal % vs expected %
 ```
 
 ---
@@ -292,6 +310,16 @@ Filter: `history.created >= cutoffISO`
 ## RAG status decision matrix
 
 Evaluate all criteria; the **worst** matching status wins.
+
+**Emoji legend (use in header, goal table, and verdict rows):**
+
+| Emoji | Status |
+|-------|--------|
+| 🟢 | On track |
+| 🟡 | At risk |
+| 🔴 | Off track |
+
+Apply emoji RAG **per row** in the goal-theme table and in the dual-status header (`Overall status` and `Sprint goal` are independent).
 
 | Check | On track | At risk | Off track |
 |-------|----------|---------|-----------|
@@ -308,37 +336,35 @@ Evaluate all criteria; the **worst** matching status wins.
 
 ## Full report template
 
+This is the **only** report format. Follow it exactly for every sprint-health run.
+
 ```markdown
 # Sprint Health Report — {sprintName}
 
 | | |
 |-|-|
 | **Date** | {YYYY-MM-DD} |
-| **Project** | SCL |
-| **Board** | 231 |
+| **Project / Board** | SCL / 231 (The A Team) |
 | **Sprint** | {sprintName} ({startDate} → {endDate}) |
-| **Days remaining** | {daysRemaining} |
-| **Scope** | Test (Zephyr) issues excluded — {testExcludedCount} ticket(s), {testExcludedSP} SP (say "include tests" to add them back) |
+| **Days remaining** | {daysRemaining} (day {daysElapsed} of {sprintLength}) |
+| **Scope** | Test (Zephyr) issues excluded — {testExcludedCount} tickets, {testExcludedSP} SP (say "include tests" to add them back) |
 | **Overall status** | {🟢 On track / 🟡 At risk / 🔴 Off track} |
+| **Sprint goal** | {🟢 On track / 🟡 At risk / 🔴 Off track} **for goal** |
 
-> {one-line RAG justification}
+> {one-line RAG justification — burndown gap, WIP concentration, flow blockers, goal themes off track}
 
 ---
 
-## Sprint Goal
+## Sprint Goal & Progress
 
-{explicit goal OR inferred goal}
+{explicit goal as numbered/bulleted list OR inferred goal prefixed with *(inferred)*}
 
-### Goal Progress
+| Goal theme | Linked work | Total SP | Done SP | % done | Verdict |
+|-----------|-------------|----------|---------|--------|---------|
+| {theme1} | {Epic key or issue keys} | {themeTotalSP} | {themeDoneSP} | {themePct}% | {🟢/🟡/🔴 short note} |
+| {theme2} | ... | ... | ... | ... | ... |
 
-| Metric | Value |
-|--------|-------|
-| Goal-linked issues | {goalIssueKeys or Epic key} |
-| Goal total SP | {goalTotalSP} |
-| Goal Done SP | {goalDoneSP} |
-| Goal % complete | {goalPctComplete}% |
-| Expected % (time elapsed) | {expectedPct}% |
-| **Goal verdict** | {On track / At risk / Off track for goal} |
+**Goal roll-up:** {goalDoneSP} of {goalTotalSP} SP done ≈ **{goalPctComplete}%** vs **{expectedPct}%** expected for elapsed time → **{🟢/🟡/🔴 overall goal verdict}**. {one sentence on which themes are dragging.}
 
 ---
 
@@ -348,12 +374,11 @@ Evaluate all criteria; the **worst** matching status wins.
 |--------|-------|
 | Total SP | {totalSP} |
 | Done SP | {doneSP} ({pctComplete}%) |
-| In Progress SP | {inProgressSP} |
-| To Do SP | {toDoSP} |
+| In Progress SP | {inProgressSP} ({ipPct}%){flag if >40%: ⚠️} |
+| To Do SP | {toDoSP} ({todoPct}%) |
+| Issues | {issueCount} (Done {doneCount} / In Progress {ipCount} / To Do {todoCount}) |
 | Unestimated issues | {unestimatedCount} |
-| Total issues | {issueCount} |
-| Test issues excluded | {testExcludedCount} ticket(s), {testExcludedSP} SP |
-| Test/QA coverage (info) | {testDoneCount} Test ticket(s) Done (not in SP totals) |
+| Tests excluded | {testExcludedCount} tickets, {testExcludedSP} SP ({testDoneCount} Done, informational) |
 
 ### Burndown
 
@@ -361,7 +386,7 @@ Evaluate all criteria; the **worst** matching status wins.
 |-|-----|
 | Ideal remaining | {idealRemaining} |
 | Actual remaining | {actualRemaining} |
-| Delta (actual − ideal) | {burndownDelta} ({burndownDeltaPct}%) |
+| Delta (actual − ideal) | {burndownDelta} ({burndownDeltaPct}% behind/ahead) |
 | Expected completion | {expectedComplete}% |
 | Actual completion | {actualComplete}% |
 | Completion gap | {completionGap}% |
@@ -370,72 +395,53 @@ Evaluate all criteria; the **worst** matching status wins.
 
 ## Since Yesterday
 
+{opening sentence: net assessment of the day — flat, forward, or regressive}
+
 | Category | Details |
 |----------|---------|
-| Completed ({count}, {spCompleted} SP) | {SCL-XXX: summary, ...} |
-| Started ({count}) | {SCL-XXX: summary, ...} |
-| Scope added ({count}, +{spAdded} SP) | {SCL-XXX: summary, ...} |
-| Scope removed ({count}, −{spRemoved} SP) | {SCL-XXX: summary, ...} |
-| Net SP change | {netSPChange} |
-| Blockers added | {list or "None"} |
+| ✅ Completed ({count}, {spCompleted} SP) | {SCL-XXX: summary (SP), ...} |
+| ▶ Moved forward | {SCL-XXX: summary — e.g. → QA, → In-Review, started (SP)} |
+| ◀ Moved backward / reopened | {SCL-XXX: summary — e.g. In-Progress→Open, QA→Open, Done→reopened (SP)} |
+| ➕ Scope added to sprint | {SCL-XXX: summary (+SP), ... or "None"} |
+| ➖ Scope removed | {SCL-XXX: summary (−SP), ... or "None"} |
+| **Net flow** | +{spCompleted} SP done vs ~{spRegressed} SP regressed → {net assessment} |
 
 ---
 
 ## Aging / Stuck Tickets
 
-| Key | Summary | Assignee | SP | Days in status | Expected | Ratio | Flag |
-|-----|---------|----------|-----|----------------|----------|-------|------|
-| SCL-XXX | ... | Name | 5 | 3.2 | 2.1d | 1.5× | Warning |
+{one-sentence bottleneck diagnosis — e.g. "N of M In-Progress items idle ≥2 business days, mostly in In-Review/QA since sprint start."}
+
+| Key | Summary | SP | Status | Idle since |
+|-----|---------|-----|--------|-----------|
+| SCL-XXX | {summary truncated} | {sp or —} | {status name} | {date or "Jul 2"} |
 
 {if no flagged issues: "No aging issues detected."}
 
 ---
 
-## Estimation Accuracy
+## Estimation Notes
 
-| Metric | Value |
-|--------|-------|
-| Completed tickets analyzed | {doneCount} |
-| Underestimated (>1.5×) | {underCount} |
-| Overestimated (<0.5×) | {overCount} |
-| Estimates changed mid-sprint | {midSprintChanges} |
-| Net suggested SP delta | {totalSuggestedSPDelta} ({suggestedSPDeltaPct}% of remaining) |
-
-### Re-estimate Proposals
-
-| Key | Summary | Current SP | Suggested SP | Basis | Confidence |
-|-----|---------|------------|--------------|-------|------------|
-| SCL-XXX | ... | 5 | 8 | 1.8× ratio, 3.2d in progress | High |
-
-{if none: "No re-estimate proposals."}
-
-### Completed Ticket Calibration
-
-| Key | SP | Expected | Actual | Ratio | Verdict |
-|-----|-----|----------|--------|-------|---------|
-| SCL-YYY | 3 | 5.5h | 12h | 2.2× | Underestimated |
-
-{if no Done tickets: "No completed tickets to calibrate."}
-
-### Mid-sprint Estimate Changes
-
-| Key | Original SP | New SP | Changed |
-|-----|-------------|--------|---------|
-| SCL-ZZZ | 3 | 5 | 2026-07-05 |
-
-{if none: "No mid-sprint estimate changes."}
+- **Unestimated:** {unestimatedCount} issues in committed scope — list keys if ≤5, else count + examples.
+- **Mid-sprint changes:** {midSprintChanges count and keys, or "None"}.
+- **Calibration:** {doneCount analyzed, under/over counts — or "Full cycle-time calibration not run; offer if user wants it."}
+{if proposals exist: include Re-estimate Proposals sub-table from Step 5b}
 
 ---
 
 ## Recommendations
 
-1. {Highest priority action}
-2. {Second action}
-3. ...
+1. {Highest priority — usually clear review/QA queue or rescue off-track goal theme}
+2. {Second — WIP limits, goal rescue, estimation}
+3. {Third}
+4. {Fourth}
+5. {Fifth — max 5 total}
 
 ---
 
-*Generated by sprint-health skill via Atlassian MCP.*
+*Generated by the sprint-health skill via Atlassian MCP (board 231, active sprint id {activeSprintId}). Tests excluded by default.*
+
+Want me to **save this to a file** (`sprint-health_SCL_{sprintName}_{YYYY-MM-DD}.md`), or **run the full estimation calibration** on completed tickets?
 ```
 
 ---
@@ -502,7 +508,8 @@ Paste the text output into the report; do not write ad-hoc parsers.
 | totalSP = 0 | Use issue-count metrics; flag estimation gap |
 | Multiple open sprints in project | Scope to board 231 only via `sprint = <activeSprintId>`; never use bare `openSprints()` |
 | Backlog items (`empty` sprint) | Excluded from metrics; board filter includes them for grooming only |
-| Sprint goal empty | Infer from Epics (mark as inferred); still compute Goal Progress |
+| Sprint goal empty | Infer from Epics (mark as inferred); still compute Goal Progress with per-theme table if multiple inferred themes |
+| Multi-part sprint goal | Split into themes; per-theme table + Goal roll-up (Step 6b) |
 | Changelog too large | Process most recent 100 histories; note truncation |
 | Issue without parent Epic | Group under "No Epic" |
 | Test (Zephyr) issues | **Excluded by default** from all SP/metric totals; reported separately. Story+Test pairs double-count if included — e.g. SCL-13211 (Story 2 SP) + SCL-13273 (Test 5 SP) |
