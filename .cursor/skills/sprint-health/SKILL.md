@@ -36,6 +36,7 @@ No configuration needed — copy one of the prompts below into chat. You get a s
 
 ## Execution constraints
 
+- **Always respond in English.** Produce the full report, all section text, and the Teams card content in English even when the user writes in another language.
 - **No ad-hoc scripts or temp files.** Do NOT create one-off Python scripts, `.sprint_tmp` directories, or parser output files in the workspace. For **small sprints** (≤ 60 issues, MCP response stays inline), compute metrics **inline** in reasoning from MCP JSON.
 - **Large-sprint fallback:** When the sprint has **> 60 issues** or an MCP search response is **> ~200 KB** (e.g. written to an agent-tools file), run the versioned parser [`scripts/sprint_metrics.py`](scripts/sprint_metrics.py) on the saved JSON dump(s). Never write a new parser per run.
 - **Minimize MCP payload:** Request only the fields listed in Step 2 — never request `description` or `*all`. Use `maxResults: 50`, paginate with `nextPageToken`, and prefer `responseContentFormat: markdown` when supported.
@@ -91,7 +92,7 @@ Task Progress:
 - [ ] Step 5b: Estimation accuracy and proposals
 - [ ] Step 6: Infer sprint goal and compute goal progress
 - [ ] Step 7: Emit report with RAG status
-- [ ] Step 8: Publish to Teams (opt-in only)
+- [ ] Step 8: Publish summary card to Teams (opt-in only)
 ```
 
 ---
@@ -408,7 +409,7 @@ Use the report template from [reference.md](reference.md) — it is the **only**
 
 - **Default:** render the report in chat using the template exactly.
 - **On request:** save to `sprint-health_SCL_<sprintName>_<YYYY-MM-DD>.md` in the workspace root.
-- **On request:** publish a basic Adaptive Card to Teams (Step 8).
+- **On request:** publish a summary Adaptive Card to Teams (Step 8).
 
 ---
 
@@ -491,9 +492,11 @@ Run **only** when the user asks to post/publish/send the report to Teams (e.g. "
 2. If the file is missing, tell the user to copy [teams-config.example.json](teams-config.example.json) to `teams-config.json` and complete [Teams publish setup](#teams-publish-setup-one-time). Do not guess or hardcode a URL.
 3. If `webhookUrl` is empty or still contains the placeholder `YOUR-POWER-AUTOMATE-WEBHOOK-URL-HERE`, stop and ask the user to paste the real URL.
 
-### 8b. Build the basic Adaptive Card
+### 8b. Build the summary Adaptive Card
 
-Load [`templates/teams-card.json`](templates/teams-card.json) and substitute placeholders from the Step 7 report metrics:
+Load [`templates/teams-card.json`](templates/teams-card.json) and substitute placeholders from the Step 7 report metrics.
+
+**Goal theme rows:** The template contains one example goal-row `ColumnSet` (the second `ColumnSet` after the header row). Before substitution, **clone that `ColumnSet` once per goal theme** from Step 6b so each theme gets its own row. Replace per-row placeholders (`{{themeName}}`, `{{themeDoneSP}}`, `{{themeTotalSP}}`, `{{themePct}}`, `{{themeVerdictEmoji}}`) with that theme's values. Remove the template row after cloning if you built all rows from scratch, or substitute the single template row when there is exactly one theme.
 
 | Placeholder | Source |
 |-------------|--------|
@@ -501,13 +504,43 @@ Load [`templates/teams-card.json`](templates/teams-card.json) and substitute pla
 | `{{sprintName}}` | Active sprint name from Step 1 |
 | `{{overallStatus}}` | Overall status label (On track / At risk / Off track) |
 | `{{goalStatus}}` | Sprint goal status label (On track / At risk / Off track) |
-| `{{doneSP}}` | Done SP from Step 3 |
-| `{{totalSP}}` | Total SP from Step 3 |
-| `{{pctComplete}}` | % complete, rounded to whole number |
+| `{{daysElapsed}}` | Days elapsed from Step 3 |
+| `{{sprintLength}}` | Sprint length from Step 3 |
 | `{{daysRemaining}}` | Days remaining from Step 3 |
-| `{{burndownDelta}}` | Burndown delta as signed SP (e.g. `+8 SP behind`, `on track`, `-2 SP ahead`) |
+| `{{ragJustification}}` | One-line RAG justification from Step 7 header |
+| `{{themeName}}` | Goal theme name (per row, from Step 6b) |
+| `{{themeDoneSP}}` | Done SP for theme (per row) |
+| `{{themeTotalSP}}` | Total SP for theme (per row) |
+| `{{themePct}}` | Theme % complete, rounded (per row) |
+| `{{themeVerdictEmoji}}` | Theme RAG emoji (per row) |
+| `{{goalDoneSP}}` | Goal roll-up done SP |
+| `{{goalTotalSP}}` | Goal roll-up total SP |
+| `{{goalPct}}` | Goal roll-up % complete |
+| `{{expectedPct}}` | Expected % complete for elapsed time |
+| `{{goalVerdictEmoji}}` | Overall goal RAG emoji |
+| `{{totalSP}}` | Total SP from Step 3 |
+| `{{doneSP}}` | Done SP from Step 3 |
+| `{{pctComplete}}` | % complete, rounded to whole number |
+| `{{inProgressSP}}` | In Progress SP from Step 3 |
+| `{{ipPct}}` | In Progress SP as % of total |
+| `{{wipWarning}}` | ` ⚠️ WIP high` when In Progress SP > 40% of total; otherwise empty string |
+| `{{toDoSP}}` | To Do SP from Step 3 |
+| `{{todoPct}}` | To Do SP as % of total |
+| `{{issueCount}}` | Scoped issue count |
+| `{{doneCount}}` | Done issue count |
+| `{{ipCount}}` | In Progress issue count |
+| `{{todoCount}}` | To Do issue count |
+| `{{unestimatedCount}}` | Unestimated issue count |
+| `{{testExcludedCount}}` | Excluded Test ticket count |
+| `{{testExcludedSP}}` | Excluded Test SP sum |
+| `{{idealRemaining}}` | Ideal remaining SP (rounded) |
+| `{{actualRemaining}}` | Actual remaining SP (rounded) |
+| `{{burndownDelta}}` | Signed burndown delta SP (e.g. `+29`, `-2`, `0`) |
+| `{{burndownDeltaPct}}` | Burndown delta as % of total SP (rounded) |
+| `{{expectedComplete}}` | Expected % complete (rounded) |
+| `{{actualComplete}}` | Actual % complete (rounded) |
 
-**Scope (basic version):** header + status line + FactSet only. Do **not** add Since Yesterday, Aging, Recommendations, or action buttons yet — those come in a later card iteration.
+**Scope (summary version):** header + justification, per-theme goal SP table, goal roll-up, Progress Summary, and Burndown. Do **not** add Since Yesterday, Aging, Estimation, Recommendations, or action buttons yet — those come in a later card iteration.
 
 Perform substitution **inline** in the agent response (string replace on the JSON). Do not write a one-off script or temp file for substitution unless the user explicitly requests a saved card file.
 
@@ -527,7 +560,7 @@ After a successful POST, confirm in chat: *Posted sprint health card to Teams.* 
 
 - Publishing is **opt-in** — normal report runs are unaffected.
 - The card is **static/informational**; interactive buttons (`Action.Submit`, `Action.Execute`) require a bot or response-waiting flow and are out of scope for this step.
-- Rich per-section card content is deferred to a follow-up iteration.
+- Since Yesterday, Aging, Estimation, Recommendations, and JIRA board link buttons are deferred to a follow-up card iteration.
 
 ---
 
@@ -543,5 +576,5 @@ After a successful POST, confirm in chat: *Posted sprint health card to Teams.* 
 
 - JQL snippets, changelog parsing, SP-to-time scale, burndown math, full report template: [reference.md](reference.md)
 - Large-sprint metrics parser (fallback): [scripts/sprint_metrics.py](scripts/sprint_metrics.py)
-- Teams Adaptive Card template (basic): [templates/teams-card.json](templates/teams-card.json)
+- Teams Adaptive Card template (summary): [templates/teams-card.json](templates/teams-card.json)
 - Teams webhook config template: [teams-config.example.json](teams-config.example.json) → copy to `teams-config.json` (gitignored)
