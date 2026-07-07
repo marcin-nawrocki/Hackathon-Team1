@@ -8,7 +8,8 @@ description: >-
   Zephyr Test issues from SP metrics (say "include tests" to override). Use when
   the user asks about sprint progress, sprint goal, burndown, daily standup,
   sprint health, SCL sprint, estimation accuracy, wrong estimate, re-estimate,
-  story points, or whether the team will hit the sprint goal.
+  story points, whether the team will hit the sprint goal, or posting sprint health
+  to Microsoft Teams.
 ---
 
 # Sprint Health
@@ -29,6 +30,7 @@ No configuration needed — copy one of the prompts below into chat. You get a s
 | Daily standup prep | `Prepare a daily standup summary` |
 | Include Test tickets in SP | `Sprint health include tests` |
 | Save report to file | Add: `Save the report to a file` |
+| Publish to Teams | Add: `Post the report to Teams` (requires [Teams setup](#teams-publish-setup-one-time)) |
 
 **Note:** By default, Zephyr **Test** issues are excluded from story-point metrics (they often duplicate parent Stories). See [Scope configuration](#scope-configuration). Say **"include tests"** to include them.
 
@@ -77,7 +79,7 @@ fields: ["summary", "status", "customfield_10200"]
 
 ## Quick start
 
-When invoked, run the full workflow below and output the report in chat. Optionally offer to save as `sprint-health_SCL_<sprintName>_<YYYY-MM-DD>.md`.
+When invoked, run the full workflow below and output the report in chat. Optionally offer to save as `sprint-health_SCL_<sprintName>_<YYYY-MM-DD>.md` and/or publish to Teams (Step 8).
 
 ```
 Task Progress:
@@ -89,6 +91,7 @@ Task Progress:
 - [ ] Step 5b: Estimation accuracy and proposals
 - [ ] Step 6: Infer sprint goal and compute goal progress
 - [ ] Step 7: Emit report with RAG status
+- [ ] Step 8: Publish to Teams (opt-in only)
 ```
 
 ---
@@ -399,12 +402,132 @@ Use the report template from [reference.md](reference.md) — it is the **only**
 6. **Aging / Stuck Tickets** — idle-since table + bottleneck diagnosis sentence
 7. **Estimation Notes** — unestimated count, mid-sprint changes, calibration summary or offer
 8. **Recommendations** — max 5, prioritized (review queue, WIP, goal rescue, estimation)
-9. **Closing offer** — ask to save `sprint-health_SCL_<sprintName>_<YYYY-MM-DD>.md` and/or run full estimation calibration
+9. **Closing offer** — ask to save `sprint-health_SCL_<sprintName>_<YYYY-MM-DD>.md`, publish to Teams (Step 8), and/or run full estimation calibration
 
 ### Output
 
 - **Default:** render the report in chat using the template exactly.
 - **On request:** save to `sprint-health_SCL_<sprintName>_<YYYY-MM-DD>.md` in the workspace root.
+- **On request:** publish a basic Adaptive Card to Teams (Step 8).
+
+---
+
+## Teams publish setup (one-time)
+
+Perform this setup once per target Teams chat. The agent does **not** create the workflow — the user configures it in Teams or Power Automate.
+
+### 1. Create the workflow
+
+1. In **Microsoft Teams**, open the **Workflows** app (or go to [make.powerautomate.com](https://make.powerautomate.com) → **Create** → **Instant cloud flow**).
+2. Choose the template **"Post to a chat when a webhook request is received"**.
+   - Uses the free Teams **webhook** trigger — not the Premium **When an HTTP request is received** trigger.
+3. In the **Post adaptive card in a chat or channel** action:
+   - **Post as:** Flow bot (or your user account, if preferred).
+   - **Post in:** **Chat**.
+   - **Chat:** select the dedicated sprint-health chat (group or 1:1).
+   - **Adaptive Card:** bind to the incoming webhook body (the template usually maps `triggerBody()` or the full request body).
+4. **Save** the flow and copy the **HTTP POST URL** from the trigger step.
+
+### 2. Store the webhook URL locally
+
+Copy the example config and paste your webhook URL:
+
+```powershell
+Copy-Item .\.cursor\skills\sprint-health\teams-config.example.json .\.cursor\skills\sprint-health\teams-config.json
+```
+
+Edit [teams-config.json](teams-config.json) (gitignored — not committed):
+
+```json
+{
+  "webhookUrl": "https://..."
+}
+```
+
+The committed template is [teams-config.example.json](teams-config.example.json). Each developer clones the repo, copies the example to `teams-config.json`, and adds their own webhook URL.
+
+### 3. Verify the webhook
+
+Send a test payload matching the expected body shape:
+
+```powershell
+$config = Get-Content .\.cursor\skills\sprint-health\teams-config.json -Raw | ConvertFrom-Json
+$body = Get-Content .\.cursor\skills\sprint-health\templates\teams-card.json -Raw
+Invoke-RestMethod -Uri $config.webhookUrl -Method Post -ContentType 'application/json' -Body $body
+```
+
+Replace `{{placeholders}}` in the template with sample values before testing, or post the raw template to confirm the flow receives JSON.
+
+### Expected request body
+
+The workflow expects a Teams message envelope with an Adaptive Card attachment:
+
+```json
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": []
+      }
+    }
+  ]
+}
+```
+
+---
+
+## Step 8: Publish to Teams (opt-in)
+
+Run **only** when the user asks to post/publish/send the report to Teams (e.g. "Post the report to Teams"). Do not publish automatically after Step 7.
+
+### 8a. Resolve webhook URL
+
+1. Read `.cursor/skills/sprint-health/teams-config.json` and parse `webhookUrl`.
+2. If the file is missing, tell the user to copy [teams-config.example.json](teams-config.example.json) to `teams-config.json` and complete [Teams publish setup](#teams-publish-setup-one-time). Do not guess or hardcode a URL.
+3. If `webhookUrl` is empty or still contains the placeholder `YOUR-POWER-AUTOMATE-WEBHOOK-URL-HERE`, stop and ask the user to paste the real URL.
+
+### 8b. Build the basic Adaptive Card
+
+Load [`templates/teams-card.json`](templates/teams-card.json) and substitute placeholders from the Step 7 report metrics:
+
+| Placeholder | Source |
+|-------------|--------|
+| `{{ragEmoji}}` | Overall RAG emoji from Step 7 (🟢 / 🟡 / 🔴) |
+| `{{sprintName}}` | Active sprint name from Step 1 |
+| `{{overallStatus}}` | Overall status label (On track / At risk / Off track) |
+| `{{goalStatus}}` | Sprint goal status label (On track / At risk / Off track) |
+| `{{doneSP}}` | Done SP from Step 3 |
+| `{{totalSP}}` | Total SP from Step 3 |
+| `{{pctComplete}}` | % complete, rounded to whole number |
+| `{{daysRemaining}}` | Days remaining from Step 3 |
+| `{{burndownDelta}}` | Burndown delta as signed SP (e.g. `+8 SP behind`, `on track`, `-2 SP ahead`) |
+
+**Scope (basic version):** header + status line + FactSet only. Do **not** add Since Yesterday, Aging, Recommendations, or action buttons yet — those come in a later card iteration.
+
+Perform substitution **inline** in the agent response (string replace on the JSON). Do not write a one-off script or temp file for substitution unless the user explicitly requests a saved card file.
+
+### 8c. POST to Teams
+
+```powershell
+$config = Get-Content .\.cursor\skills\sprint-health\teams-config.json -Raw | ConvertFrom-Json
+$body = '<substituted JSON from 8b>'
+Invoke-RestMethod -Uri $config.webhookUrl -Method Post -ContentType 'application/json' -Body $body
+```
+
+### 8d. Confirm to user
+
+After a successful POST, confirm in chat: *Posted sprint health card to Teams.* On failure, report the HTTP status/error and suggest re-running the [verify step](#3-verify-the-webhook).
+
+### Notes
+
+- Publishing is **opt-in** — normal report runs are unaffected.
+- The card is **static/informational**; interactive buttons (`Action.Submit`, `Action.Execute`) require a bot or response-waiting flow and are out of scope for this step.
+- Rich per-section card content is deferred to a follow-up iteration.
 
 ---
 
@@ -420,3 +543,5 @@ Use the report template from [reference.md](reference.md) — it is the **only**
 
 - JQL snippets, changelog parsing, SP-to-time scale, burndown math, full report template: [reference.md](reference.md)
 - Large-sprint metrics parser (fallback): [scripts/sprint_metrics.py](scripts/sprint_metrics.py)
+- Teams Adaptive Card template (basic): [templates/teams-card.json](templates/teams-card.json)
+- Teams webhook config template: [teams-config.example.json](teams-config.example.json) → copy to `teams-config.json` (gitignored)

@@ -1,0 +1,43 @@
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+          {
+            "type": "TextBlock",
+            "size": "Large",
+            "weight": "Bolder",
+            "text": "{{ragEmoji}} Sprint Health - {{sprintName}}"
+          },
+          {
+            "type": "TextBlock",
+            "wrap": true,
+            "text": "Overall: {{overallStatus}} | Goal: {{goalStatus}}"
+          },
+          {
+            "type": "FactSet",
+            "facts": [
+              {
+                "title": "Done SP",
+                "value": "{{doneSP}} / {{totalSP}} ({{pctComplete}}%)"
+              },
+              {
+                "title": "Days left",
+                "value": "{{daysRemaining}}"
+              },
+              {
+                "title": "Burndown",
+                "value": "{{burndownDelta}}"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
