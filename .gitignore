@@ -1,2 +1,11 @@
+# Python bytecode cache
+__pycache__/
+*.py[cod]
+
 # Sprint Health — local Teams webhook (copy from teams-config.example.json)
 .cursor/skills/sprint-health/teams-config.json
+# Sprint Health — Jira API token for bulk changelog fetch (copy from jira-config.example.json)
+.cursor/skills/sprint-health/jira-config.json
+
+# Sprint Health — temp MCP JSON dumps (parser input)
+.sprint_tmp/

@@ -1,0 +1,5 @@
+{
+  "site": "inhabitiq.atlassian.net",
+  "email": "YOUR-ATLASSIAN-EMAIL@example.com",
+  "apiToken": "YOUR-JIRA-API-TOKEN-HERE"
+}

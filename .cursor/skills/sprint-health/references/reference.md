@@ -10,7 +10,15 @@ Detailed JQL, changelog parsing, SP scale, burndown math, and report template.
 
 **Backlog exclusion:** Board 231's saved filter includes `empty` (backlog) for grooming. Sprint-health metrics scope to the committed active sprint only; backlog items are excluded.
 
-**Test exclusion (default):** Append `AND issuetype != Test` to all metric JQL below. Omit when the user requests **"include tests"**. Test issues are fetched separately for the exclusion summary (see SKILL.md Scope configuration).
+**Test handling (three modes):**
+
+| Mode | JQL | Separate Test query |
+|------|-----|---------------------|
+| **Skip** (default) | `AND issuetype != Test` on metric JQL | Not run |
+| **Show** | `AND issuetype != Test` on metric JQL | Run Test-only query for exclusion summary |
+| **Include** | Omit `issuetype != Test` | Not needed |
+
+Append `AND issuetype != Test` to all metric JQL below unless the user requests **"include tests"**. Run the Test-only query only when the user requests **"show tests"** (see SKILL.md Scope configuration).
 
 ### Active sprint issues (full pull — default scope)
 
@@ -24,45 +32,42 @@ Include-tests variant:
 project = SCL AND sprint = <activeSprintId>
 ```
 
-### Test issues (exclusion summary only)
+### Test issues (show mode only — opt-in)
 
 ```jql
 project = SCL AND sprint = <activeSprintId> AND issuetype = Test
 ```
 
-### Recently changed (day-to-day delta)
+### Historical sprint issues (point-in-time `--as-of`)
 
-Prefer `startOfDay(-1)` over bare `-1d` — the rolling 24h window misses completions from the previous calendar day.
-
-```jql
-project = SCL AND sprint = <activeSprintId> AND issuetype != Test
-AND status CHANGED AFTER startOfDay(-1)
-```
-
-If combined status/sprint change query fails, run separate queries. Sprint scope changes:
+Use `fetch_sprints.py --as-of <YYYY-MM-DD>` to resolve the sprint active on that date, then:
 
 ```jql
-project = SCL AND sprint = <activeSprintId> AND issuetype != Test AND sprint CHANGED AFTER -1d
+project = SCL AND sprint = <sprintId> AND issuetype != Test
 ```
+
+Jira's `Sprint` field is **cumulative** — `sprint = S` returns tickets ever in sprint S (including carryover now in a later sprint). The parser replays changelog `Sprint` entries to filter membership at the as-of date.
+
+**Residual gap:** tickets manually removed from sprint S to backlog after the as-of date are no longer returned by `sprint = S` and cannot be recovered.
+
+### Day-to-day delta (changelog — parser `deltas`)
+
+Changelogs are bulk-fetched via [`scripts/fetch_changelogs.py`](../scripts/fetch_changelogs.py). The parser `deltas` block classifies events since cutoff (yesterday 00:00 UTC):
+
+- **Completed:** status transition to Done
+- **Moved forward:** transition into In Progress category
+- **Regressed:** Done → reopened, or In Progress → To Do/Open (hard demotion)
+- **Sent back:** review/QA status → earlier pipeline (e.g. In-Review → In-Progress, QA → In-Progress)
+- **Scope added/removed:** Sprint field changes
+- **SP changes:** Story Points field changes
+
+Do **not** use `sprint CHANGED AFTER` JQL — it is rejected by the Atlassian MCP endpoint. Scope changes come from changelog `Sprint` field entries.
 
 ### In-progress issues (aging candidates)
 
 ```jql
 project = SCL AND sprint = <activeSprintId> AND issuetype != Test
 AND statusCategory = "In Progress"
-```
-
-### Completed in last day
-
-```jql
-project = SCL AND sprint = <activeSprintId> AND issuetype != Test
-AND status CHANGED TO Done AFTER -1d
-```
-
-### Scope added to sprint in last day
-
-```jql
-project = SCL AND sprint = <activeSprintId> AND issuetype != Test AND sprint CHANGED AFTER -1d
 ```
 
 ### Unestimated in-progress issues
@@ -75,17 +80,15 @@ AND "Story Points" is EMPTY
 
 Replace `"Story Points"` with `customfield_10200` if the named field is not indexed.
 
-### Epic peer lookup (estimation calibration)
+### Epic peer lookup (batched — Step 5b.3, opt-in)
+
+Collect Epic keys from **To Do** scoped issues, then one query (limit ~50):
 
 ```jql
-project = SCL AND parent = {epicKey} AND statusCategory = Done AND issuetype != Test ORDER BY updated DESC
+project = SCL AND parent IN (<epicKey1>, <epicKey2>, ...) AND statusCategory = Done AND issuetype != Test ORDER BY updated DESC
 ```
 
-Limit to ~20 results. Include peers from the current sprint and optionally the most recent closed sprint:
-
-```jql
-project = SCL AND parent = {epicKey} AND statusCategory = Done AND issuetype != Test AND sprint in closedSprints() ORDER BY updated DESC
-```
+Omit `issuetype != Test` when user requested include tests. Fetch peer changelogs with `fetch_changelogs.py`, then pass `--epic-peers` and `--peer-changelogs --todo-reestimates` to the parser.
 
 ---
 
@@ -158,9 +161,9 @@ Given:
 
 - `totalSP` — sum of all story points in the sprint
 - `doneSP` — sum of SP in Done status
-- `daysElapsed` — calendar days since sprint start (including today)
-- `daysRemaining` — calendar days until sprint end (minimum 0)
-- `sprintLength` — `daysElapsed + daysRemaining`
+- `daysElapsed` — **business days** (Mon-Fri) since sprint start through today (weekends excluded)
+- `daysRemaining` — business days from today through sprint end
+- `sprintLength` — business days from sprint start through sprint end (~10 for a 2-week sprint)
 
 ```
 actualRemaining   = totalSP - doneSP
@@ -203,15 +206,25 @@ Look for `items` where `field === "status"`:
 fromString → toString  (at created, by author)
 ```
 
-Map `toString` to status category using the issue's current status metadata or a known mapping:
+Map `toString` / `fromString` using `.sprint_tmp/jira-status-mapping.json` (fetched by `fetch_statuses.py` at the start of Step 3). Each SCL status has:
 
-| Status category | Typical status names |
-|-----------------|---------------------|
-| To Do | Open, To Do, Backlog, Selected for Development |
-| In Progress | In Progress, In Review, In QA, Code Review |
-| Done | Done, Closed, Resolved, Released |
+| Field | Meaning |
+|-------|---------|
+| `statusCategory` | Jira native category (To Do / In Progress / Done) |
+| `sprintHealthBucket` | Parser bucket: `todo`, `in_progress`, `review_qa`, `done` |
 
-When the mapping is ambiguous, use `statusCategory` from the issue fetch in Step 2 as the source of truth for the current status, and infer categories for historical statuses from `fromString`/`toString` context.
+**SCL buckets (25 statuses):**
+
+| Bucket | Statuses |
+|--------|----------|
+| `todo` | Open, Groomed, Epic Concept, Epic Scoping, Initiative Approved, Initiative Ideation |
+| `in_progress` | In-Progress, Blocked, Dev Done, Epic Definition/Development/Grooming/Scheduling, Initiative Committed |
+| `review_qa` | In-Review, QA, User Acceptance Testing, Epic Testing |
+| `done` | Done, Accepted, Deployed, Closed, Archive, Epic Complete, Initiative Closed |
+
+Changelog deltas use buckets: **completed** → `done`; **started** → enter `in_progress` or `review_qa`; **sent back** → leave `review_qa` without reaching `done`; **regressed** → leave `done` or active work.
+
+When the mapping file is missing a historical status name, the parser falls back to keyword heuristics (`review`, `qa`, `test`, etc.).
 
 ### Time-in-status calculation
 
@@ -338,6 +351,8 @@ Apply emoji RAG **per row** in the goal-theme table and in the dual-status heade
 
 This is the **only** report format. Follow it exactly for every sprint-health run.
 
+**Jira key links:** Render every Jira key as a markdown link: `[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX)`. Base URL derives from the configured `site` in `jira-config.json` (`inhabitiq.atlassian.net`).
+
 ```markdown
 # Sprint Health Report — {sprintName}
 
@@ -347,11 +362,19 @@ This is the **only** report format. Follow it exactly for every sprint-health ru
 | **Project / Board** | SCL / 231 (The A Team) |
 | **Sprint** | {sprintName} ({startDate} → {endDate}) |
 | **Days remaining** | {daysRemaining} (day {daysElapsed} of {sprintLength}) |
-| **Scope** | Test (Zephyr) issues excluded — {testExcludedCount} tickets, {testExcludedSP} SP (say "include tests" to add them back) |
+| **Scope** | {scope line — see below} |
 | **Overall status** | {🟢 On track / 🟡 At risk / 🔴 Off track} |
 | **Sprint goal** | {🟢 On track / 🟡 At risk / 🔴 Off track} **for goal** |
 
 > {one-line RAG justification — burndown gap, WIP concentration, flow blockers, goal themes off track}
+
+**Scope line variants:**
+
+| Test mode | Scope line text |
+|-----------|-----------------|
+| Skip (default) | `Tests not fetched (skipped)` |
+| Show | `Test issues excluded — {testExcludedCount} tickets, {testExcludedSP} SP` |
+| Include | `Tests included in SP metrics` |
 
 ---
 
@@ -361,7 +384,7 @@ This is the **only** report format. Follow it exactly for every sprint-health ru
 
 | Goal theme | Linked work | Total SP | Done SP | % done | Verdict |
 |-----------|-------------|----------|---------|--------|---------|
-| {theme1} | {Epic key or issue keys} | {themeTotalSP} | {themeDoneSP} | {themePct}% | {🟢/🟡/🔴 short note} |
+| {theme1} | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX), ...} | {themeTotalSP} | {themeDoneSP} | {themePct}% | {🟢/🟡/🔴 short note} |
 | {theme2} | ... | ... | ... | ... | ... |
 
 **Goal roll-up:** {goalDoneSP} of {goalTotalSP} SP done ≈ **{goalPctComplete}%** vs **{expectedPct}%** expected for elapsed time → **{🟢/🟡/🔴 overall goal verdict}**. {one sentence on which themes are dragging.}
@@ -378,7 +401,7 @@ This is the **only** report format. Follow it exactly for every sprint-health ru
 | To Do SP | {toDoSP} ({todoPct}%) |
 | Issues | {issueCount} (Done {doneCount} / In Progress {ipCount} / To Do {todoCount}) |
 | Unestimated issues | {unestimatedCount} |
-| Tests excluded | {testExcludedCount} tickets, {testExcludedSP} SP ({testDoneCount} Done, informational) |
+| Tests | {scope line or show-mode: {testExcludedCount} tickets, {testExcludedSP} SP ({testDoneCount} Done, informational)} |
 
 ### Burndown
 
@@ -399,12 +422,13 @@ This is the **only** report format. Follow it exactly for every sprint-health ru
 
 | Category | Details |
 |----------|---------|
-| ✅ Completed ({count}, {spCompleted} SP) | {SCL-XXX: summary (SP), ...} |
-| ▶ Moved forward | {SCL-XXX: summary — e.g. → QA, → In-Review, started (SP)} |
-| ◀ Moved backward / reopened | {SCL-XXX: summary — e.g. In-Progress→Open, QA→Open, Done→reopened (SP)} |
-| ➕ Scope added to sprint | {SCL-XXX: summary (+SP), ... or "None"} |
-| ➖ Scope removed | {SCL-XXX: summary (−SP), ... or "None"} |
-| **Net flow** | +{spCompleted} SP done vs ~{spRegressed} SP regressed → {net assessment} |
+| ✅ Completed ({count}, {spCompleted} SP) | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX): summary (SP), ...} |
+| ▶ Moved forward | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX): summary — e.g. → QA, → In-Review, started (SP)} |
+| ↩ Sent back from review/QA | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) + SP from deltas.sent_back, or "None"} |
+| ◀ Moved backward / reopened | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) + SP from deltas.regressed, or "None"} |
+| ➕ Scope added to sprint | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX): summary (+SP), ... or "None"} |
+| ➖ Scope removed | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) + SP from deltas.scope_removed, or "None"} |
+| **Net flow** | +{spCompleted} SP done vs ~{spSentBack} SP sent back vs ~{spRegressed} SP regressed → {assessment} |
 
 ---
 
@@ -414,7 +438,7 @@ This is the **only** report format. Follow it exactly for every sprint-health ru
 
 | Key | Summary | SP | Status | Idle since |
 |-----|---------|-----|--------|-----------|
-| SCL-XXX | {summary truncated} | {sp or —} | {status name} | {date or "Jul 2"} |
+| [SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) | {summary truncated} | {sp or —} | {status name} | {date or "Jul 2"} |
 
 {if no flagged issues: "No aging issues detected."}
 
@@ -422,10 +446,10 @@ This is the **only** report format. Follow it exactly for every sprint-health ru
 
 ## Estimation Notes
 
-- **Unestimated:** {unestimatedCount} issues in committed scope — list keys if ≤5, else count + examples.
-- **Mid-sprint changes:** {midSprintChanges count and keys, or "None"}.
-- **Calibration:** {doneCount analyzed, under/over counts — or "Full cycle-time calibration not run; offer if user wants it."}
-{if proposals exist: include Re-estimate Proposals sub-table from Step 5b}
+- **Unestimated:** {unestimatedCount} issues in committed scope — list linked keys (`[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX)`) if ≤5, else count + examples.
+- **Mid-sprint changes:** {midSprintChanges count and linked keys, or "None"}.
+- **Calibration:** {doneCount analyzed, under/over counts}
+{if To Do re-estimates requested: include proposals from parser todo_reestimates}
 
 ---
 
@@ -439,9 +463,9 @@ This is the **only** report format. Follow it exactly for every sprint-health ru
 
 ---
 
-*Generated by the sprint-health skill via Atlassian MCP (board 231, active sprint id {activeSprintId}). Tests excluded by default.*
+*Generated by the sprint-health skill via Atlassian MCP + Jira bulk changelog (board 231, active sprint id {activeSprintId}). Tests skipped unless requested.*
 
-Want me to **save this to a file** (`sprint-health_SCL_{sprintName}_{YYYY-MM-DD}.md`), or **run the full estimation calibration** on completed tickets?
+Want me to **save this to a file** (`sprint-health_SCL_{sprintName}_{YYYY-MM-DD}.md`) or **post to Teams**?
 ```
 
 ---
@@ -462,41 +486,109 @@ Tool: searchJiraIssuesUsingJql
 Arguments:
   cloudId: "https://inhabitiq.atlassian.net"
   jql: "project = SCL AND sprint = <activeSprintId> AND issuetype != Test"
-  maxResults: 50
-  fields: ["summary", "status", "statuscategory", "issuetype", "parent", "assignee", "customfield_10200", "customfield_10115", "priority", "labels"]
+  maxResults: 100
+  responseContentFormat: "markdown"
+  fields: ["summary", "status", "statuscategory", "issuetype", "parent", "assignee", "customfield_10200", "customfield_10115", "priority", "labels", "resolutiondate"]
 ```
 
-Do not request `description` or `*all`. Paginate with `nextPageToken`.
+Pass the auto-written output file path to `fetch_changelogs.py` and the parser. Temp JSON (status mapping, changelogs, metrics) goes to `.sprint_tmp/`.
 
-### Fetch changelog for aging
-
-```
-Tool: getJiraIssue
-Arguments:
-  cloudId: "https://inhabitiq.atlassian.net"
-  issueIdOrKey: "SCL-123"
-  expand: "changelog"
-  fields: ["summary", "status", "customfield_10200"]
-```
-
-### Large-sprint parser fallback
-
-When inline parsing is impractical (> 60 issues or > ~200 KB MCP response), run the versioned parser on saved JSON dumps:
+### Fetch statuses (cached by runner)
 
 ```bash
-python .cursor/skills/sprint-health/scripts/sprint_metrics.py \
-  path/to/issues_page1.json path/to/issues_page2.json \
-  --tests path/to/tests.json \
-  --start 2026-07-02 --end 2026-07-16 --today 2026-07-07 \
-  --format text
+python .cursor/skills/sprint-health/scripts/fetch_statuses.py \
+  --config .cursor/skills/sprint-health/jira-config.json \
+  --output .sprint_tmp/jira-status-mapping.json \
+  [--max-age-days 7] [--force]
+```
+
+Standalone default (`--max-age-days 0`) always fetches. The runner uses `--max-age-days 7` by default.
+
+### Fetch changelogs (required — bulkfetch)
+
+```bash
+python .cursor/skills/sprint-health/scripts/fetch_changelogs.py \
+  <path-to-issues-json> \
+  --config .cursor/skills/sprint-health/jira-config.json \
+  --output .sprint_tmp/changelogs.json
+```
+
+Requires Jira API token in `jira-config.json`. One HTTP call for all sprint issues (up to 1000).
+
+Use `--full` to omit the `fieldIds` filter (required for point-in-time `--as-of` replay of Sprint and Story Points).
+
+### Resolve sprint for a date (historical)
+
+```bash
+python .cursor/skills/sprint-health/scripts/fetch_sprints.py \
+  --as-of 2026-06-25 \
+  --output .sprint_tmp/sprint.json
+```
+
+Prints `SPRINT_ID`, `START`, `END`, `GOAL`, and suggested JQL to stdout.
+
+### Sprint report runner (preferred — one process, parallel I/O)
+
+```bash
+python .cursor/skills/sprint-health/scripts/sprint_report.py \
+  <path-to-issues-json> [issues_page2.json ...] \
+  --out .sprint_tmp/metrics.json \
+  --start 2026-07-02 --end 2026-07-16 \
+  [--today 2026-07-07] \
+  [--as-of 2026-06-25 --sprint-id 14379 --sprint-name "SCL Sprint 55" --sprint-state closed] \
+  [--tests <tests-json>] \
+  [--theme "Sykes / release=sykes,SCL-3875"]
 ```
 
 Options:
-- `--include-tests` — count Test issues in SP totals (default: excluded)
-- `--changelogs path/to/changelogs.json` — optional map `{ "SCL-123": { histories: [...] } }` for aging and day-to-day deltas
-- `--format json` — machine-readable output
+- `--status-max-age-days` — reuse cached status mapping (default 7; runner only)
+- `--force-status` — ignore status cache
+- `--full` — all changelog fields (auto-enabled with `--as-of`)
+- `--include-tests` — count Test issues in SP totals
+- `--theme LABEL=kw1,kw2` — goal theme rollup (repeatable)
 
-Paste the text output into the report; do not write ad-hoc parsers.
+### Sprint metrics parser (fallback — changelogs already on disk)
+
+```bash
+python .cursor/skills/sprint-health/scripts/sprint_metrics.py \
+  <path-to-issues-json> \
+  --changelogs .sprint_tmp/changelogs.json \
+  --out .sprint_tmp/metrics.json \
+  --start 2026-07-02 --end 2026-07-16 --today 2026-07-07 \
+  [--tests <tests-json>] \
+  [--theme "Sykes / release=sykes,SCL-3875"]
+```
+
+Options:
+- `--changelogs` — **required**; map from `fetch_changelogs.py`
+- `--status-mapping` — defaults to `.sprint_tmp/jira-status-mapping.json` from `fetch_statuses.py`
+- `--out` — write JSON to file; stdout prints path + summary line
+- `--tests` — show-mode Test dump
+- `--include-tests` — count Test issues in SP totals
+- `--theme LABEL=kw1,kw2` — goal theme rollup (repeatable)
+- `--epic-peers` / `--peer-changelogs` / `--todo-reestimates` — To Do Epic calibration (opt-in)
+- `--as-of YYYY-MM-DD` / `--sprint-id` / `--sprint-name` / `--sprint-state` — point-in-time report (requires `--full` changelogs)
+- `--cutoff-end` — upper bound for deltas window (default: end of as-of day)
+
+Read `.sprint_tmp/metrics.json`; do not re-run the parser for a different format.
+
+---
+
+## Point-in-time replay (`snapshot_at`)
+
+When `--as-of` is set, the parser reconstructs each ticket's state at end-of-day UTC:
+
+| Field | Replay source |
+|-------|---------------|
+| Status | Last `status` changelog entry with `created <= as_of`; if none, `fromString` of first future entry or current field |
+| Story Points | Last `Story Points` / `customfield_10200` entry `<= as_of` |
+| Sprint membership | Last `Sprint` / `customfield_10115` entry `<= as_of` (`to` field = cumulative sprint IDs) |
+
+**Membership gate:** only tickets whose replayed `sprint_ids` contains `--sprint-id` are included in metrics. Excludes tickets added to the sprint after the as-of date and tickets not yet in the sprint on that date.
+
+**Deltas window:** lower bound = previous day 00:00 UTC; upper bound = as-of day 23:59:59 UTC (`--cutoff-end`).
+
+**Aging:** `now` = as-of day 12:00 UTC; days-in-status measured to last status transition `<= as_of`.
 
 ---
 
@@ -512,10 +604,16 @@ Paste the text output into the report; do not write ad-hoc parsers.
 | Multi-part sprint goal | Split into themes; per-theme table + Goal roll-up (Step 6b) |
 | Changelog too large | Process most recent 100 histories; note truncation |
 | Issue without parent Epic | Group under "No Epic" |
-| Test (Zephyr) issues | **Excluded by default** from all SP/metric totals; reported separately. Story+Test pairs double-count if included — e.g. SCL-13211 (Story 2 SP) + SCL-13273 (Test 5 SP) |
+| Test (Zephyr) issues | **Skipped by default** (not fetched). Show mode: excluded from metrics but summarized. Include mode: in SP totals. Story+Test pairs double-count if included |
+| User says "show tests" | Run Test-only query; scope line shows exclusion summary + QA coverage |
 | User says "include tests" | Omit `issuetype != Test` from JQL; scope line shows "Tests included" |
+| No Jira API token | Stop; instruct user to configure jira-config.json |
+| Lite vs full mode | Removed — single changelog-backed flow only |
+| `sprint CHANGED` JQL | Rejected by Atlassian MCP — use changelog `Sprint` field |
+| MCP `fields` param | Additive only; baseline set (incl. `description`) always returned; never use `*all` |
+| Shell budget | One parser run per report; ~20s overhead per Shell call in typical environments |
 | Sub-tasks with SP | Include in scoped totals (default); note if excluded |
-| Weekend/holiday | Aging uses business days; burndown uses calendar days |
+| Weekend/holiday | Aging uses business hours; burndown/expected % use business days (Mon-Fri, no holiday calendar) |
 | No In Progress transition | Use `created` as cycle start; note in calibration table |
 | Ticket re-opened after Done | Use most recent In Progress → Done cycle |
 | No changelog history | Skip calibration for that issue; note "insufficient history" |
@@ -523,3 +621,5 @@ Paste the text output into the report; do not write ad-hoc parsers.
 | No Epic peers for To Do | Skip Epic-calibrated proposal for that issue |
 | SP = 0 on Done ticket | Classify as "Unestimated"; exclude from ratio averages |
 | Equidistant Fibonacci | Round up to next Fibonacci value |
+| Point-in-time `--as-of` | Use `fetch_sprints.py` + `sprint = <id>` JQL + parser `--as-of --sprint-id`; `--full` changelogs required |
+| Ticket removed to backlog after as-of | Not returned by `sprint =` JQL; note in `as_of.membership_note` |
