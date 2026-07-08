@@ -33,6 +33,7 @@ Copy one of the prompts below into chat. Every prompt runs the **same full workf
 | Show Test exclusion summary | `Sprint health show tests` |
 | Include Test tickets in SP | `Sprint health include tests` |
 | Save report to file | Add: `Save the report to a file` |
+| Generate a roast (HTML) | Add: `generate ROAST` or `also roast it` (styled HTML roast; opt-in add-on — see [Step 9](#step-9-roast-html-output-opt-in)) |
 | Publish to Teams | Add: `Post the report to Teams` (single summary+toggle card; requires [Teams setup](#teams-publish-setup-one-time)) |
 | Historical / point-in-time report | `Sprint health as of 2026-07-05` or `What did the sprint look like on Monday?` |
 
@@ -81,7 +82,7 @@ Recommendations lead the report (right after the verdict); detailed metrics foll
 
 ## Quick start
 
-When invoked, detect **test mode** (skip vs show vs include) and whether **To Do re-estimates** (5b.3) are requested. Run the workflow below.
+When invoked, detect **test mode** (skip vs show vs include), whether **To Do re-estimates** (5b.3) are requested, and whether a **ROAST** (Step 9, opt-in HTML add-on) is requested. Run the workflow below.
 
 ```
 Task Progress:
@@ -97,6 +98,7 @@ Task Progress:
 - [ ] Step 6: Infer sprint goal and compute goal progress
 - [ ] Step 7: Emit report with RAG status (recommendations first, role-based owners)
 - [ ] Step 8: Publish to Teams (opt-in only)
+- [ ] Step 9: Generate ROAST HTML (opt-in only)
 ```
 
 ---
@@ -429,6 +431,29 @@ Substitute placeholders from the Step 7 report:
 
 ---
 
+## Step 9: ROAST HTML output (opt-in)
+
+Run only when the user asks to **roast** the sprint (e.g. "generate ROAST", "also roast it"). This is an **add-on** — it does not run its own data pull. It reuses the same `metrics.json` from Step 3, so complete Steps 1–6 first (a full report in Step 7 is not required, but the metrics must exist).
+
+The roast is a styled, humorous HTML variant of the report. Read [`references/roast.md`](references/roast.md) for the voice, required body structure, and the award→metric mapping.
+
+1. **Author the body fragment.** From `metrics.json` (`metrics`, `deltas`, `bottleneck`, `themes`, `aging`), write the roast body HTML — status pills, intro `.banner`, 3–5 `.award` cards, `😬` scoreboard table, `🧊` honest-WIP `.wipbox` row, a constructive `.serious` block (reuse the Top recommendations with `[SCL-XXX]` browse links), and a `.foot` footer. **Every number must come from the metrics** — never invent a stat for a punchline. Escape `<`, `>`, `&` in any injected text. Save the fragment to `.sprint_tmp/roast_body.html`.
+2. **Render** the full HTML by wrapping the fragment in the shared shell:
+
+```powershell
+python .cursor/skills/sprint-health/scripts/render_roast.py `
+  --title "🔥 THE A TEAM ROAST — <sprintName> 🔥" `
+  --subtitle "Roast edition · <YYYY-MM-DD> · Day <daysElapsed> of <sprintLength> working days · real data, zero mercy" `
+  --body .sprint_tmp/roast_body.html `
+  --out "sprint-health_ROAST_SCL_<sprintName-with-dashes>_<YYYY-MM-DD>.html"
+```
+
+3. The script prints `WROTE <path>`. The output HTML is written to the **workspace root** (mirrors the standard `.md` report name). Tell the user where it landed and offer to open it.
+
+**Rules:** Roast the *process/situation*, not people; always end constructive; English only.
+
+---
+
 ## MCP tools used
 
 | Tool | Purpose |
@@ -445,10 +470,12 @@ Local scripts:
 | [`scripts/fetch_sprints.py`](scripts/fetch_sprints.py) | Resolve sprint for a date (`--as-of`) via Agile API |
 | [`scripts/fetch_changelogs.py`](scripts/fetch_changelogs.py) | Bulk changelog via REST (used by runner; `--full` for `--as-of`) |
 | [`scripts/sprint_metrics.py`](scripts/sprint_metrics.py) | Metrics parser (`build_result`); standalone fallback when changelogs already fetched |
+| [`scripts/render_roast.py`](scripts/render_roast.py) | Wrap the agent-authored roast body in the styled HTML shell (Step 9, opt-in) |
 
 ## Additional resources
 
 - JQL, changelog parsing, SP scale, burndown, report template: [references/reference.md](references/reference.md)
+- ROAST voice, structure, and award→metric mapping: [references/roast.md](references/roast.md); template: [assets/roast-template.html](assets/roast-template.html)
 - Teams card (single summary+toggle): [assets/teams-card.json](assets/teams-card.json)
 - Config templates: [jira-config.example.json](jira-config.example.json), [teams-config.example.json](teams-config.example.json), [team-roster.example.json](team-roster.example.json)
 - Team roster (committed): [team-roster.json](team-roster.json) — testers + frontend explicit, full-stack is the default role (Step 0b)

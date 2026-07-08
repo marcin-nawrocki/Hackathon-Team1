@@ -27,6 +27,7 @@ In Cursor chat:
 - `Sprint health — what changed since yesterday and are we on track for the sprint goal?`
 - `Which tickets are stuck or running long?`
 - `Propose re-estimates for To Do tickets` — adds Epic-calibrated To Do proposals (opt-in)
+- `Sprint health, also generate a ROAST` — styled, data-driven HTML roast (opt-in add-on)
 
 See [`SKILL.md`](SKILL.md#how-to-use-example-prompts) for show/include tests, save to file, post to Teams.
 
@@ -41,6 +42,9 @@ Standard [Agent Skills](https://cursor.com/docs/skills) layout: `SKILL.md`, `scr
 | `scripts/fetch_statuses.py` | Fetch Jira statuses → `.sprint_tmp/jira-status-mapping.json` | Yes |
 | `scripts/fetch_changelogs.py` | Bulk changelog via Jira REST | Yes |
 | `scripts/sprint_metrics.py` | Metrics, deltas, themes, aging, bottleneck (requires `--changelogs`) | Yes |
+| `scripts/render_roast.py` | Wrap the agent-authored roast body in the styled HTML shell (opt-in ROAST) | Yes |
+| `references/roast.md` | ROAST voice, structure, award→metric mapping | Yes |
+| `assets/roast-template.html` | Styled HTML shell for the ROAST output (CSS + tokens) | Yes |
 | `assets/teams-card.json` | Single Teams Adaptive Card (summary + "Show more data" toggle) | Yes |
 | `jira-config.example.json` | Jira token template | Yes |
 | `team-roster.example.json` | Team roster template | Yes |
