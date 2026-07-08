@@ -406,16 +406,26 @@ Copy [`team-roster.example.json`](team-roster.example.json) to `team-roster.json
 
 See existing workflow in this file (unchanged). Template: [`assets/teams-card.json`](assets/teams-card.json) — a single Adaptive Card with an always-visible summary and a **Show more data** toggle that reveals the detailed sections.
 
+**Layout (v2 — structured):** the card uses **`ColumnSet` "tables"** (header row + one row per item), **`FactSet`** for key/value blocks (Progress & burndown, Since-yesterday counters), and **colored RAG `Container`s** for the dual status header. Native Adaptive `Table` elements are intentionally **not** used — they render blank on iOS/mobile Teams clients. Card version stays `1.5`.
+
 ---
 
 ## Step 8: Publish to Teams (opt-in)
 
-Run only when the user asks to post/publish/send to Teams. There is **one** card: [`assets/teams-card.json`](assets/teams-card.json). It shows a summary (status, TL;DR/verdict, goal roll-up, top facts, top 3 recommendations) always, plus an `Action.ToggleVisibility` button ("Show more data") that expands a hidden container holding the full detail (theme table, progress & burndown, since-yesterday, bottleneck split, longest-waiting, QA concentration, estimation notes).
+Run only when the user asks to post/publish/send to Teams. There is **one** card: [`assets/teams-card.json`](assets/teams-card.json). It shows a summary (status, TL;DR/verdict, goal roll-up, what-matters, top 3 recommendations) always, plus an `Action.ToggleVisibility` button ("Show more data") that expands a hidden container holding the full detail (goal theme table, progress & burndown, since-yesterday, bottleneck split, longest-waiting, all recommendations).
+
+**Structured-row rule:** the goal-theme table, longest-waiting table, and all-recommendations table are `ColumnSet` "tables" — a **header** `ColumnSet` followed by **one data `ColumnSet` per item**. The template ships with example rows (3 themes, 5 waiting, 5 recs); when building the payload, **add or delete `ColumnSet` rows** so the count matches the actual data. Do not leave unfilled placeholder rows in the posted card. Keep RAG/priority cells colored via `TextBlock` `color` (`Good`/`Warning`/`Attention`).
 
 Substitute placeholders from the Step 7 report:
 
-- Summary: `{{ragEmoji}}`, `{{sprintName}}`, `{{overallStatus}}`, `{{goalStatus}}`, `{{daysElapsed}}`, `{{sprintLength}}`, `{{daysRemaining}}`, `{{tldr}}`, `{{oneLineVerdict}}`, `{{goalRollup}}`, `{{whatMattersBody}}`, `{{recommendationsSummary}}` (top 3).
-- Detail (inside toggle): `{{themesBody}}`, progress/burndown facts, `{{sinceYesterdayBody}}` (full `deltas` detail), `{{bottleneckBody}}` (status split + longest-waiting + QA concentration), `{{estimationBody}}`, `{{recommendationsBody}}` (all 5 with owners).
+- **RAG header:** `{{ragEmoji}}`, `{{overallStatus}}`, `{{goalStatus}}`, plus `{{overallStyle}}`/`{{goalStyle}}` (Container style: `good`/`warning`/`attention`) and `{{overallColor}}`/`{{goalColor}}` (TextBlock color: `Good`/`Warning`/`Attention`).
+- **Summary:** `{{sprintName}}`, `{{sprintStateSuffix}}` (e.g. " · sprint closed" or ""), `{{daysElapsed}}`, `{{sprintLength}}`, `{{daysRemaining}}`, `{{tldr}}`, `{{oneLineVerdict}}`, `{{goalDoneSP}}`/`{{goalTotalSP}}`/`{{goalPct}}`/`{{expectedPct}}`/`{{goalVerdictEmoji}}`, `{{whatMattersBody}}` (bulleted text), and top-3 recs `{{rec1Prio}}`/`{{rec1Text}}` … `{{rec3Text}}`.
+- **Goal theme rows:** per theme `{{themeNName}}`, `{{themeNSP}}` (done/total), `{{themeNPct}}`, `{{themeNEmoji}}`, `{{themeNColor}}`.
+- **Progress & burndown (FactSet):** `{{totalSP}}`, `{{issueCount}}`, `{{doneSP}}`, `{{pctComplete}}`, `{{doneCount}}`, `{{inProgressSP}}`, `{{ipPct}}`, `{{ipCount}}`, `{{wipWarning}}`, `{{toDoSP}}`, `{{todoPct}}`, `{{todoCount}}`, `{{actualRemaining}}`, `{{idealRemaining}}`, `{{burndownDeltaPct}}`, `{{unestimatedCount}}`, `{{testsLine}}`.
+- **Since yesterday (FactSet + note):** `{{prevReportDate}}`, `{{completedCount}}`, `{{spCompleted}}`, `{{startedCount}}`, `{{sentBackCount}}`, `{{spSentBack}}`, `{{regressedCount}}`, `{{spRegressed}}`, `{{scopeLine}}`, `{{sinceYesterdayNotable}}` (notable keys).
+- **Bottleneck:** `{{devCount}}`/`{{devSP}}`, `{{reviewCount}}`/`{{reviewSP}}`, `{{qaCount}}`/`{{qaSP}}`; longest-waiting rows `{{waitNKey}}`/`{{waitNQueue}}`/`{{waitNIdle}}`; `{{bottleneckNote}}` (unassigned reviewers + QA concentration).
+- **All recommendations rows:** `{{recNPrio}}` (colored emoji) + `{{recNFull}}` (action with owners).
+- **Footer:** `{{rosterLine}}`.
 
 ---
 
