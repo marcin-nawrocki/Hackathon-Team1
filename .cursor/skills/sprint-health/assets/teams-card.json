@@ -6,198 +6,178 @@
       "content": {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "type": "AdaptiveCard",
-        "version": "1.4",
+        "version": "1.5",
         "body": [
           {
             "type": "TextBlock",
             "size": "Large",
             "weight": "Bolder",
-            "text": "{{ragEmoji}} Sprint Health - {{sprintName}}"
+            "wrap": true,
+            "text": "{{ragEmoji}} Sprint Health — {{sprintName}}"
           },
           {
             "type": "TextBlock",
             "isSubtle": true,
             "wrap": true,
+            "spacing": "None",
             "text": "Overall: {{overallStatus}} | Goal: {{goalStatus}} | Day {{daysElapsed}}/{{sprintLength}} ({{daysRemaining}} left)"
           },
           {
-            "type": "TextBlock",
-            "wrap": true,
-            "text": "{{ragJustification}}"
-          },
-          {
-            "type": "TextBlock",
-            "weight": "Bolder",
-            "text": "Sprint Goal Progress"
-          },
-          {
-            "type": "ColumnSet",
-            "columns": [
+            "type": "Container",
+            "style": "emphasis",
+            "bleed": true,
+            "items": [
               {
-                "type": "Column",
-                "width": "stretch",
-                "items": [
-                  {
-                    "type": "TextBlock",
-                    "weight": "Bolder",
-                    "text": "Theme",
-                    "wrap": true
-                  }
-                ]
+                "type": "TextBlock",
+                "weight": "Bolder",
+                "text": "TL;DR"
               },
               {
-                "type": "Column",
-                "width": "auto",
-                "items": [
-                  {
-                    "type": "TextBlock",
-                    "weight": "Bolder",
-                    "text": "SP",
-                    "wrap": true
-                  }
-                ]
+                "type": "TextBlock",
+                "wrap": true,
+                "spacing": "None",
+                "text": "{{tldr}}"
               },
               {
-                "type": "Column",
-                "width": "auto",
-                "items": [
-                  {
-                    "type": "TextBlock",
-                    "weight": "Bolder",
-                    "text": "%",
-                    "wrap": true
-                  }
-                ]
-              },
-              {
-                "type": "Column",
-                "width": "auto",
-                "items": [
-                  {
-                    "type": "TextBlock",
-                    "weight": "Bolder",
-                    "text": "Status",
-                    "wrap": true
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "type": "ColumnSet",
-            "columns": [
-              {
-                "type": "Column",
-                "width": "stretch",
-                "items": [
-                  {
-                    "type": "TextBlock",
-                    "text": "{{themeName}}",
-                    "wrap": true
-                  }
-                ]
-              },
-              {
-                "type": "Column",
-                "width": "auto",
-                "items": [
-                  {
-                    "type": "TextBlock",
-                    "text": "{{themeDoneSP}}/{{themeTotalSP}} SP",
-                    "wrap": true
-                  }
-                ]
-              },
-              {
-                "type": "Column",
-                "width": "auto",
-                "items": [
-                  {
-                    "type": "TextBlock",
-                    "text": "{{themePct}}%",
-                    "wrap": true
-                  }
-                ]
-              },
-              {
-                "type": "Column",
-                "width": "auto",
-                "items": [
-                  {
-                    "type": "TextBlock",
-                    "text": "{{themeVerdictEmoji}}",
-                    "wrap": true
-                  }
-                ]
+                "type": "TextBlock",
+                "wrap": true,
+                "isSubtle": true,
+                "text": "Verdict: {{oneLineVerdict}}"
               }
             ]
           },
           {
             "type": "TextBlock",
             "wrap": true,
-            "text": "Goal roll-up: {{goalDoneSP}}/{{goalTotalSP}} SP ({{goalPct}}%) vs {{expectedPct}}% expected -> {{goalVerdictEmoji}}"
+            "text": "**Goal roll-up:** {{goalDoneSP}}/{{goalTotalSP}} SP ({{goalPct}}%) vs {{expectedPct}}% expected -> {{goalVerdictEmoji}}"
           },
           {
             "type": "TextBlock",
             "weight": "Bolder",
-            "text": "Progress Summary"
+            "text": "What matters most"
           },
           {
-            "type": "FactSet",
-            "facts": [
+            "type": "TextBlock",
+            "wrap": true,
+            "spacing": "None",
+            "text": "{{whatMattersBody}}"
+          },
+          {
+            "type": "TextBlock",
+            "weight": "Bolder",
+            "text": "Top recommendations"
+          },
+          {
+            "type": "TextBlock",
+            "wrap": true,
+            "spacing": "None",
+            "text": "{{recommendationsSummary}}"
+          },
+          {
+            "type": "ActionSet",
+            "actions": [
               {
-                "title": "Total SP",
-                "value": "{{totalSP}}"
-              },
-              {
-                "title": "Done SP",
-                "value": "{{doneSP}} ({{pctComplete}}%)"
-              },
-              {
-                "title": "In Progress SP",
-                "value": "{{inProgressSP}} ({{ipPct}}%){{wipWarning}}"
-              },
-              {
-                "title": "To Do SP",
-                "value": "{{toDoSP}} ({{todoPct}}%)"
-              },
-              {
-                "title": "Issues",
-                "value": "{{issueCount}} (Done {{doneCount}} / IP {{ipCount}} / To Do {{todoCount}})"
-              },
-              {
-                "title": "Unestimated",
-                "value": "{{unestimatedCount}}"
-              },
-              {
-                "title": "Tests excluded",
-                "value": "{{testExcludedCount}} tickets, {{testExcludedSP}} SP"
+                "type": "Action.ToggleVisibility",
+                "title": "Show more data",
+                "targetElements": ["moreData"]
               }
             ]
           },
           {
-            "type": "TextBlock",
-            "weight": "Bolder",
-            "text": "Burndown"
-          },
-          {
-            "type": "FactSet",
-            "facts": [
+            "type": "Container",
+            "id": "moreData",
+            "isVisible": false,
+            "items": [
               {
-                "title": "Ideal remaining",
-                "value": "{{idealRemaining}} SP"
+                "type": "TextBlock",
+                "weight": "Bolder",
+                "separator": true,
+                "text": "Sprint Goal Progress"
               },
               {
-                "title": "Actual remaining",
-                "value": "{{actualRemaining}} SP"
+                "type": "TextBlock",
+                "wrap": true,
+                "spacing": "None",
+                "text": "{{themesBody}}"
               },
               {
-                "title": "Delta",
-                "value": "{{burndownDelta}} SP ({{burndownDeltaPct}}%)"
+                "type": "TextBlock",
+                "weight": "Bolder",
+                "separator": true,
+                "text": "Progress & Burndown"
               },
               {
-                "title": "Expected vs Actual",
-                "value": "{{expectedComplete}}% / {{actualComplete}}%"
+                "type": "FactSet",
+                "facts": [
+                  { "title": "Total", "value": "{{totalSP}} SP / {{issueCount}} issues" },
+                  { "title": "Done", "value": "{{doneSP}} SP ({{pctComplete}}%) / {{doneCount}}" },
+                  { "title": "In Progress (cat.)", "value": "{{inProgressSP}} SP ({{ipPct}}%) / {{ipCount}}{{wipWarning}}" },
+                  { "title": "To Do", "value": "{{toDoSP}} SP ({{todoPct}}%) / {{todoCount}}" },
+                  { "title": "Burndown", "value": "{{actualRemaining}} vs ideal {{idealRemaining}} SP ({{burndownDeltaPct}}%)" },
+                  { "title": "Unestimated", "value": "{{unestimatedCount}}" },
+                  { "title": "Tests excluded", "value": "{{testExcludedCount}} tickets, {{testExcludedSP}} SP" }
+                ]
+              },
+              {
+                "type": "TextBlock",
+                "weight": "Bolder",
+                "separator": true,
+                "text": "Since Yesterday"
+              },
+              {
+                "type": "TextBlock",
+                "wrap": true,
+                "spacing": "None",
+                "text": "{{sinceYesterdayBody}}"
+              },
+              {
+                "type": "TextBlock",
+                "weight": "Bolder",
+                "separator": true,
+                "text": "Bottleneck — where the work actually is"
+              },
+              {
+                "type": "TextBlock",
+                "wrap": true,
+                "spacing": "None",
+                "text": "In-Progress {{devCount}} · In-Review {{reviewCount}} · QA {{qaCount}}"
+              },
+              {
+                "type": "TextBlock",
+                "wrap": true,
+                "spacing": "None",
+                "text": "{{bottleneckBody}}"
+              },
+              {
+                "type": "TextBlock",
+                "weight": "Bolder",
+                "separator": true,
+                "text": "Estimation & method notes"
+              },
+              {
+                "type": "TextBlock",
+                "wrap": true,
+                "spacing": "None",
+                "text": "{{estimationBody}}"
+              },
+              {
+                "type": "TextBlock",
+                "weight": "Bolder",
+                "separator": true,
+                "text": "All recommendations"
+              },
+              {
+                "type": "TextBlock",
+                "wrap": true,
+                "spacing": "None",
+                "text": "{{recommendationsBody}}"
+              },
+              {
+                "type": "TextBlock",
+                "isSubtle": true,
+                "wrap": true,
+                "separator": true,
+                "text": "Roster: {{rosterLine}}"
               }
             ]
           }

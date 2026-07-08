@@ -560,6 +560,8 @@ def compute_metrics(
     total_sp = done_sp = ip_sp = todo_sp = 0.0
     unestimated = 0
     by_cat: dict[str, int] = defaultdict(int)
+    dev_count = review_count = qa_count = 0
+    dev_sp = review_sp = qa_sp = 0.0
 
     for issue in scoped:
         s = issue_sp(issue)
@@ -577,6 +579,17 @@ def compute_metrics(
             done_sp += s
         elif cat == "In Progress":
             ip_sp += s
+            status_name = issue_status_name(issue)
+            if is_review_qa_status(status_name):
+                if review_qa_subtype(status_name) == "In-Review":
+                    review_count += 1
+                    review_sp += s
+                else:
+                    qa_count += 1
+                    qa_sp += s
+            else:
+                dev_count += 1
+                dev_sp += s
         else:
             todo_sp += s
 
@@ -600,6 +613,12 @@ def compute_metrics(
         "done_sp": done_sp,
         "in_progress_sp": ip_sp,
         "todo_sp": todo_sp,
+        "in_progress_dev_count": dev_count,
+        "in_progress_dev_sp": dev_sp,
+        "in_review_count": review_count,
+        "in_review_sp": review_sp,
+        "qa_count": qa_count,
+        "qa_sp": qa_sp,
         "unestimated": unestimated,
         "by_category": dict(by_cat),
         "days_elapsed": days_elapsed,
@@ -681,6 +700,16 @@ def is_done_status(name: str) -> bool:
     return name.lower() in _FALLBACK_DONE
 
 
+def review_qa_subtype(name: str) -> str:
+    """Split the review_qa bucket into a human queue label: In-Review vs QA."""
+    lower = name.lower()
+    if "review" in lower:
+        return "In-Review"
+    if any(k in lower for k in ("qa", "test", "uat", "verify", "validation", "accept")):
+        return "QA"
+    return "QA"
+
+
 def business_hours_between(start: datetime, end: datetime) -> float:
     if end <= start:
         return 0.0
@@ -712,6 +741,114 @@ def days_in_current_status(
     if changed:
         return max(0.0, (now - changed).total_seconds() / 86400.0)
     return 0.0
+
+
+def status_change_ts(
+    issue: dict[str, Any], changelog: dict[str, Any] | None, now: datetime
+) -> datetime | None:
+    """Timestamp of the last status transition at/before `now` (idle-since anchor)."""
+    key = issue["key"]
+    if changelog or key in _PARSED_CL:
+        parsed = get_parsed(key, changelog)
+        if parsed.status:
+            past_idx = _bisect_last_before(parsed.status, now)
+            if past_idx is not None:
+                return parsed.status[past_idx][0]
+            return parsed.status[0][0]
+    return status_category_changed_at(issue)
+
+
+def bottleneck_breakdown(
+    scoped: list[dict[str, Any]],
+    changelogs: dict[str, dict[str, Any]],
+    now: datetime,
+) -> dict[str, Any]:
+    """Split the 'In Progress' status category into real dev In-Progress vs In-Review vs QA.
+
+    Surfaces where work is actually parked: the review/QA queue, unassigned reviewers,
+    and QA-load concentration on a single assignee.
+    """
+    dev: list[dict[str, Any]] = []
+    review: list[dict[str, Any]] = []
+    qa: list[dict[str, Any]] = []
+    waiting: list[dict[str, Any]] = []
+    qa_by_assignee: dict[str, dict[str, Any]] = {}
+    unassigned_in_review: list[str] = []
+    stale_count = 0
+    today = now.date()
+
+    for issue in scoped:
+        if status_category(issue) != "In Progress":
+            continue
+        key = issue["key"]
+        sp = issue_sp(issue)
+        summary = issue_summary(issue)
+        assignee = (issue["fields"].get("assignee") or {}).get("displayName") or "Unassigned"
+        unassigned = assignee == "Unassigned"
+        status_name = issue_status_name(issue)
+        cl = changelogs.get(key) if changelogs else None
+        ts = status_change_ts(issue, cl, now)
+        idle_since = ts.date().isoformat() if ts else None
+        idle_business_days = business_days(ts.date(), today) if ts else 0
+
+        base = {
+            "key": key,
+            "summary": summary,
+            "sp": sp,
+            "assignee": assignee,
+            "unassigned": unassigned,
+            "status": status_name,
+            "idle_since": idle_since,
+            "idle_business_days": idle_business_days,
+        }
+
+        if is_review_qa_status(status_name):
+            queue = review_qa_subtype(status_name)
+            entry = {**base, "queue": queue}
+            waiting.append(entry)
+            if queue == "In-Review":
+                review.append(entry)
+                if unassigned:
+                    unassigned_in_review.append(key)
+            else:
+                qa.append(entry)
+                if not unassigned:
+                    row = qa_by_assignee.setdefault(
+                        assignee, {"assignee": assignee, "count": 0, "sp": 0.0, "keys": []}
+                    )
+                    row["count"] += 1
+                    row["sp"] += sp
+                    row["keys"].append(key)
+            if idle_business_days >= 2:
+                stale_count += 1
+        else:
+            dev.append(base)
+
+    # Longest-waiting first: oldest idle date, then largest SP.
+    waiting.sort(key=lambda e: (e["idle_since"] or "9999", -e["sp"]))
+    qa_rows = sorted(qa_by_assignee.values(), key=lambda r: r["sp"], reverse=True)
+
+    return {
+        "in_progress_dev": {
+            "count": len(dev),
+            "sp": sum(e["sp"] for e in dev),
+            "issues": dev,
+        },
+        "in_review": {
+            "count": len(review),
+            "sp": sum(e["sp"] for e in review),
+            "issues": review,
+        },
+        "qa": {
+            "count": len(qa),
+            "sp": sum(e["sp"] for e in qa),
+            "issues": qa,
+        },
+        "waiting": waiting,
+        "qa_by_assignee": qa_rows,
+        "unassigned_in_review": unassigned_in_review,
+        "stale_count": stale_count,
+    }
 
 
 def aging_flags(
@@ -1057,12 +1194,21 @@ def format_text(
 def print_summary_line(result: dict[str, Any], out_path: Path | None) -> None:
     m = result["metrics"]
     d = result.get("deltas") or {}
+    b = result.get("bottleneck") or {}
     parts = [
         f"issues={m['issue_count']}",
         f"done_sp={m['done_sp']}/{m['total_sp']}",
         f"aging={len(result.get('aging', []))}",
         f"deltas_done={d.get('completed_count', 0)}",
     ]
+    if b:
+        parts.append(
+            "bottleneck=dev{}/review{}/qa{}".format(
+                (b.get("in_progress_dev") or {}).get("count", 0),
+                (b.get("in_review") or {}).get("count", 0),
+                (b.get("qa") or {}).get("count", 0),
+            )
+        )
     if out_path:
         print(f"WROTE {out_path}")
     print("SUMMARY " + " ".join(parts))
@@ -1150,6 +1296,7 @@ def build_result(
     scoped_keys = set(scoped_by_key)
     now = datetime.combine(today, time(12, 0), tzinfo=timezone.utc)
     aging = aging_flags(scoped, changelogs, now)
+    bottleneck = bottleneck_breakdown(scoped, changelogs, now)
     deltas = changelog_deltas(scoped_keys, scoped_by_key, changelogs, cutoff, cutoff_end)
 
     todo_proposals: list[dict[str, Any]] = []
@@ -1169,6 +1316,7 @@ def build_result(
         "top_epics": top_epics,
         "themes": themes,
         "aging": aging,
+        "bottleneck": bottleneck,
         "deltas": deltas,
     }
     if as_of_meta:

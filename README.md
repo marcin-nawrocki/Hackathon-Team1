@@ -68,6 +68,8 @@ Following the standard [Agent Skills](https://cursor.com/docs/skills) layout (`s
     ├── SKILL.md                    # main agent instructions
     ├── README.md                   # skill overview, requirements, setup
     ├── jira-config.example.json    # template for Jira API token (required)
+    ├── team-roster.example.json    # template for team roster (owner suggestions)
+    ├── team-roster.json            # team roster: roles for owner suggestions (committed)
     ├── teams-config.example.json   # template for Teams webhook (publishing)
     ├── scripts/
     │   ├── sprint_metrics.py       # metrics parser (requires changelogs)
@@ -76,11 +78,10 @@ Following the standard [Agent Skills](https://cursor.com/docs/skills) layout (`s
     ├── references/
     │   └── reference.md            # JQL, burndown, report template (on-demand)
     └── assets/
-        ├── teams-card.json         # Teams Adaptive Card — summary
-        └── teams-card-full.json    # Teams Adaptive Card — full report
+        └── teams-card.json         # Teams Adaptive Card (summary + "Show more data" toggle)
 ```
 
-Local config files `jira-config.json` and `teams-config.json` are created from the `*.example.json` templates and are **gitignored** (never committed).
+Local config files `jira-config.json` and `teams-config.json` are created from the `*.example.json` templates and are **gitignored** (never committed). `team-roster.json` is committed.
 
 ## Contributing
 

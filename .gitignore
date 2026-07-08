@@ -6,6 +6,8 @@ __pycache__/
 .cursor/skills/sprint-health/teams-config.json
 # Sprint Health — Jira API token for bulk changelog fetch (copy from jira-config.example.json)
 .cursor/skills/sprint-health/jira-config.json
+# Sprint Health — team roster
+.cursor/skills/sprint-health/team-roster.json
 
 # Sprint Health — temp MCP JSON dumps (parser input)
 .sprint_tmp/

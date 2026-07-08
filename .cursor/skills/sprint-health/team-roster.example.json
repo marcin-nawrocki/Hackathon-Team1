@@ -1,0 +1,6 @@
+{
+  "_comment": "Maps team members to roles for the report's per-role owner suggestions and the 'Team roster used for suggestions' line. Only testers and frontend are listed explicitly; everyone else (including any Jira assignee not listed here) is treated as the defaultRole (full-stack).",
+  "testers": [""],
+  "frontend": [""],
+  "defaultRole": "full-stack"
+}

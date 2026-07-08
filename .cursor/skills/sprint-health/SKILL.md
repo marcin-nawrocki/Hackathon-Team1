@@ -33,8 +33,7 @@ Copy one of the prompts below into chat. Every prompt runs the **same full workf
 | Show Test exclusion summary | `Sprint health show tests` |
 | Include Test tickets in SP | `Sprint health include tests` |
 | Save report to file | Add: `Save the report to a file` |
-| Publish to Teams (summary card) | Add: `Post the report to Teams` (requires [Teams setup](#teams-publish-setup-one-time)) |
-| Publish full report to Teams | Add: `Post the full report to Teams` (uses [teams-card-full.json](assets/teams-card-full.json)) |
+| Publish to Teams | Add: `Post the report to Teams` (single summary+toggle card; requires [Teams setup](#teams-publish-setup-one-time)) |
 | Historical / point-in-time report | `Sprint health as of 2026-07-05` or `What did the sprint look like on Monday?` |
 
 **Note:** By default, Zephyr **Test** issues are **not fetched** (saves one MCP round-trip). See [Scope configuration](#scope-configuration).
@@ -52,7 +51,9 @@ Copy one of the prompts below into chat. Every prompt runs the **same full workf
 
 ## Report sections (every run)
 
-Dual RAG header, Sprint Goal & Progress, Progress Summary, Since Yesterday (from parser `deltas`), Aging / Stuck Tickets, Estimation Notes (calibration + mid-sprint changes; in-progress re-estimates from aging), Recommendations.
+In this order: title + sub-line + dual RAG status, TL;DR, one-line verdict, **Top recommendations** (with role-based owners), Team roster line, What matters most, Sprint goal progress, Progress & burndown, Since yesterday (from parser `deltas`), Bottleneck (from parser `bottleneck` — In-Progress vs In-Review vs QA split, longest-waiting review/QA, QA load concentration), Estimation & method notes (unestimated, mid-sprint changes, calibration/in-progress re-estimates from aging, method notes), footer.
+
+Recommendations lead the report (right after the verdict); detailed metrics follow. Owner suggestions come from `team-roster.json` (Step 0b). Use the report template in [references/reference.md](references/reference.md).
 
 **To Do Epic-calibrated re-estimates (Step 5b.3)** run only when the user explicitly asks (e.g. "propose re-estimates for To Do", "Epic-calibrated estimates").
 
@@ -85,14 +86,16 @@ When invoked, detect **test mode** (skip vs show vs include) and whether **To Do
 ```
 Task Progress:
 - [ ] Step 0: Verify Jira API token (jira-config.json)
+- [ ] Step 0b: Read team-roster.json (for role-based owner suggestions)
 - [ ] Step 1: Resolve cloudId and active sprint
 - [ ] Step 2: Pull all sprint issues (+ optional Test query if show mode)
 - [ ] Step 3: Bulkfetch changelogs + run parser (one shell call)
 - [ ] Step 4: Day-to-day delta (from parser deltas)
 - [ ] Step 5: Aging analysis (from parser aging)
+- [ ] Step 5a: Bottleneck breakdown (from parser bottleneck)
 - [ ] Step 5b: Estimation accuracy (from parser + changelogs; 5b.3 opt-in)
 - [ ] Step 6: Infer sprint goal and compute goal progress
-- [ ] Step 7: Emit report with RAG status
+- [ ] Step 7: Emit report with RAG status (recommendations first, role-based owners)
 - [ ] Step 8: Publish to Teams (opt-in only)
 ```
 
@@ -104,6 +107,18 @@ Task Progress:
 2. If the file is missing, tell the user to copy [`jira-config.example.json`](jira-config.example.json) to `jira-config.json` and complete [Jira API token setup](#jira-api-token-setup-one-time). **Stop.**
 3. If `email` or `apiToken` is empty or contains `YOUR-`, **stop** with the same instructions.
 4. Do **not** proceed without a valid token. Do **not** use MCP `getJiraIssue expand=changelog` as a fallback.
+
+---
+
+## Step 0b: Read team roster (for owner suggestions)
+
+1. Read `.cursor/skills/sprint-health/team-roster.json`. If missing, fall back to [`team-roster.example.json`](team-roster.example.json); if neither exists, **omit** the "Suggested owners" column and the "Team roster used for suggestions" line (do not stop).
+2. **Role resolution** for any person (Jira `assignee.displayName`):
+   - name in `testers` → **Tester**
+   - name in `frontend` → **Frontend**
+   - otherwise → **`defaultRole`** (full-stack) — this covers every other dev without enumerating them.
+3. Use roles to author the **Suggested owners (by role)** column in Top recommendations (Step 7): off-load QA from an overloaded tester to other testers; assign reviewers/dev work to full-stack devs; route frontend/CSS work to the frontend dev.
+4. Render the **Team roster used for suggestions** line: list testers and frontend explicitly, describe full-stack as "all other contributors" (optionally naming the devs seen in the current sprint scope). A current assignee outside the roster (e.g. a non-team member) is treated as full-stack for suggestions but may be noted as "current assignee only".
 
 ---
 
@@ -230,6 +245,7 @@ Read `todo_reestimates` and `epic_median_ratios` from the JSON output.
 | `themes` | Per-theme SP rollup when `--theme` passed |
 | `top_epics` | Top 12 epics by score |
 | `aging` | Stuck/over-running flags from changelogs |
+| `bottleneck` | In-Progress-category status split: `in_progress_dev` / `in_review` / `qa` (count, sp, issue lists w/ assignee + `idle_since`), `waiting` (longest-idle review/QA, w/ `queue`), `qa_by_assignee`, `unassigned_in_review`, `stale_count`. Also mirrored as `in_progress_dev_count/sp`, `in_review_count/sp`, `qa_count/sp` in `metrics`. |
 | `todo_reestimates` | Epic-calibrated To Do proposals (only with `--todo-reestimates`) |
 | `as_of` | Point-in-time metadata (only with `--as-of`): date, sprint, membership counts |
 
@@ -262,6 +278,17 @@ Use parser `aging` block. For each flagged In Progress issue: key, summary, SP, 
 **Flag thresholds:** Warning >1.5×, Critical >2.0×, Stale ≥2 days idle, Unestimated risk (SP=0, >1 day).
 
 Add a one-sentence bottleneck diagnosis (e.g. review/QA queue).
+
+---
+
+## Step 5a: Bottleneck breakdown
+
+Use parser `bottleneck` block to render the "⛔ Bottleneck" section:
+
+- Show the status split of the In-Progress category: `in_progress_dev.count` (dev coding) vs `in_review.count` vs `qa.count`.
+- List the `in_progress_dev.issues` (key, SP, assignee).
+- Build the **Longest-waiting review/QA** table from `bottleneck.waiting` (longest-idle first): key, summary, SP, `queue` (In-Review/QA), assignee, `idle_since` (format ISO date as "Mon D"). `stale_count` = how many have been idle ≥2 business days.
+- Call out unassigned reviewers from `unassigned_in_review` and QA concentration from the top `qa_by_assignee` row (assignee holding a disproportionate SP share). Feed both into the Top recommendations (Step 7) with roster-based owners.
 
 ---
 
@@ -309,18 +336,20 @@ Determine **two independent RAG statuses** — overall sprint health and sprint 
 | **At risk** | Burndown 10–25% behind OR 1+ warning aging OR scope grew >10% yesterday OR underestimation >50% with burndown behind |
 | **Off track** | Burndown >25% behind OR 1+ critical aging OR 0 SP in 2 business days with >50% elapsed OR net suggested SP delta >15% of remaining |
 
-**Always include:**
+**Always include (in this order — see the template in [references/reference.md](references/reference.md)):**
 
-1. Dual RAG header with one-line justification
-2. Sprint name, dates, scope line (for `--as-of`: prefix with **As of {date}** and show sprint state; include `as_of.membership_note` if present)
-3. Sprint Goal & Progress (themes table + roll-up)
-4. Progress Summary + burndown
-5. Since Yesterday (full `deltas` detail)
-6. Aging / Stuck Tickets
-7. Estimation Notes (unestimated, mid-sprint changes, calibration, in-progress proposals; To Do proposals if 5b.3 ran)
-8. Recommendations (max 5)
-9. Closing offer — save file and/or post to Teams
-10. **Jira key links** — render every ticket/epic key as a markdown browse link: `[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX)` (base URL from `jira-config.json` `site`)
+1. Title + sub-line (date · working days · sprint id) + dual RAG status line (for `--as-of`: prefix with **As of {date}** and show sprint state; include `as_of.membership_note` if present)
+2. **TL;DR** narrative + **one-line verdict**
+3. **Top recommendations** (max 5, priority-emoji ordered) with **Suggested owners (by role)** from the roster (Step 0b) — omit the owners column only if no roster
+4. **Team roster used for suggestions** line
+5. **What matters most** (3–6 bullets)
+6. **Sprint goal progress** (themes table + roll-up)
+7. **Progress & burndown** (combined Metric/Value/Note table)
+8. **Since yesterday** (full `deltas` detail + net flow)
+9. **Bottleneck** (from Step 5a: status split, In-Progress dev list, longest-waiting review/QA table, QA load concentration)
+10. **Estimation & method notes** (unestimated, mid-sprint changes, progress basis, excluded tests, "In Progress" counts clarification, overall verdict; To Do proposals if 5b.3 ran)
+11. Footer + closing offer — save file and/or post to Teams
+12. **Jira key links** — render every ticket/epic key as a markdown browse link: `[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX)` (base URL from `jira-config.json` `site`)
 
 Use the report template from [references/reference.md](references/reference.md).
 
@@ -357,22 +386,36 @@ python .\.cursor\skills\sprint-health\scripts\fetch_changelogs.py `
 
 ---
 
+## Team roster setup (for owner suggestions)
+
+The report's **Suggested owners (by role)** column and the **Team roster** line read `team-roster.json` (committed). List only testers and the frontend dev; everyone else resolves to `defaultRole` (full-stack) automatically:
+
+```json
+{
+  "testers": ["Aleksandra Małolepsza", "Krystyna Fabianowska", "Izabela Wojtczak", "Szymon Bartylak"],
+  "frontend": ["Bartłomiej Rzemieniewski"],
+  "defaultRole": "full-stack"
+}
+```
+
+Copy [`team-roster.example.json`](team-roster.example.json) to `team-roster.json` and edit as the team changes. If neither file exists, the skill still runs but omits named owners (Step 0b).
+
+---
+
 ## Teams publish setup (one-time)
 
-See existing workflow in this file (unchanged). Templates: [`assets/teams-card.json`](assets/teams-card.json), [`assets/teams-card-full.json`](assets/teams-card-full.json).
+See existing workflow in this file (unchanged). Template: [`assets/teams-card.json`](assets/teams-card.json) — a single Adaptive Card with an always-visible summary and a **Show more data** toggle that reveals the detailed sections.
 
 ---
 
 ## Step 8: Publish to Teams (opt-in)
 
-Run only when the user asks to post/publish/send to Teams.
+Run only when the user asks to post/publish/send to Teams. There is **one** card: [`assets/teams-card.json`](assets/teams-card.json). It shows a summary (status, TL;DR/verdict, goal roll-up, top facts, top 3 recommendations) always, plus an `Action.ToggleVisibility` button ("Show more data") that expands a hidden container holding the full detail (theme table, progress & burndown, since-yesterday, bottleneck split, longest-waiting, QA concentration, estimation notes).
 
-| Variant | Trigger | Template |
-|---------|---------|----------|
-| Summary | `Post the report to Teams` | [`assets/teams-card.json`](assets/teams-card.json) |
-| Full | `Post the full report to Teams` | [`assets/teams-card-full.json`](assets/teams-card-full.json) |
+Substitute placeholders from the Step 7 report:
 
-Substitute placeholders from Step 7 report. For `{{sinceYesterdayBody}}`, use full `deltas` detail (completed, started, sent back from review/QA, regressed/reopened, scope, net flow).
+- Summary: `{{ragEmoji}}`, `{{sprintName}}`, `{{overallStatus}}`, `{{goalStatus}}`, `{{daysElapsed}}`, `{{sprintLength}}`, `{{daysRemaining}}`, `{{tldr}}`, `{{oneLineVerdict}}`, `{{goalRollup}}`, `{{whatMattersBody}}`, `{{recommendationsSummary}}` (top 3).
+- Detail (inside toggle): `{{themesBody}}`, progress/burndown facts, `{{sinceYesterdayBody}}` (full `deltas` detail), `{{bottleneckBody}}` (status split + longest-waiting + QA concentration), `{{estimationBody}}`, `{{recommendationsBody}}` (all 5 with owners).
 
 ---
 
@@ -396,6 +439,7 @@ Local scripts:
 ## Additional resources
 
 - JQL, changelog parsing, SP scale, burndown, report template: [references/reference.md](references/reference.md)
-- Teams cards: [assets/teams-card.json](assets/teams-card.json), [assets/teams-card-full.json](assets/teams-card-full.json)
-- Config templates: [jira-config.example.json](jira-config.example.json), [teams-config.example.json](teams-config.example.json)
+- Teams card (single summary+toggle): [assets/teams-card.json](assets/teams-card.json)
+- Config templates: [jira-config.example.json](jira-config.example.json), [teams-config.example.json](teams-config.example.json), [team-roster.example.json](team-roster.example.json)
+- Team roster (committed): [team-roster.json](team-roster.json) — testers + frontend explicit, full-stack is the default role (Step 0b)
 - Temp files: `.sprint_tmp/` (gitignored)

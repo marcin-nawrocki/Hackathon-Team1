@@ -1,6 +1,6 @@
 # Sprint Health skill
 
-Generates a changelog-backed sprint health report for the SCL JIRA board (**board 231 — The A Team**) using the Atlassian MCP server, bulk Jira REST changelog fetch, and a versioned local parser. Tracks sprint goal progress, day-to-day deltas, stuck tickets, and estimation calibration.
+Generates a changelog-backed sprint health report for the SCL JIRA board (**board 231 — The A Team**) using the Atlassian MCP server, bulk Jira REST changelog fetch, and a versioned local parser. The report leads with a TL;DR and prioritized, role-based recommendations, then covers sprint goal progress, day-to-day deltas, a bottleneck breakdown (In-Progress vs In-Review vs QA, longest-waiting queue, QA load concentration), and estimation calibration.
 
 For workflow and prompts, see [`SKILL.md`](SKILL.md). JQL, burndown math, and the report template: [`references/reference.md`](references/reference.md).
 
@@ -11,6 +11,7 @@ For workflow and prompts, see [`SKILL.md`](SKILL.md). JQL, burndown math, and th
 | **Python 3.9+** (3.11+ recommended) | Always | Runs `scripts/sprint_metrics.py`, `scripts/fetch_changelogs.py`, and `scripts/fetch_statuses.py`. Standard library only — **no pip packages**. |
 | **Atlassian MCP server** | Always | `getAccessibleAtlassianResources` and `searchJiraIssuesUsingJql`. Must be connected in Cursor. |
 | **Jira API token** (`jira-config.json`) | **Required** | Bulk changelog fetch. Copy from `jira-config.example.json`. Without it, the skill stops with setup instructions. |
+| **Team roster** (`team-roster.json`) | Owner suggestions | Committed. Maps people to roles (testers + frontend explicit; everyone else is full-stack). Copy from `team-roster.example.json`. If absent, owner suggestions are omitted. |
 | **Teams webhook** (`teams-config.json`) | Teams publish only | Opt-in. Copy from `teams-config.example.json`. |
 
 ```powershell
@@ -39,9 +40,11 @@ Standard [Agent Skills](https://cursor.com/docs/skills) layout: `SKILL.md`, `scr
 | `references/reference.md` | JQL, burndown, report template | Yes |
 | `scripts/fetch_statuses.py` | Fetch Jira statuses → `.sprint_tmp/jira-status-mapping.json` | Yes |
 | `scripts/fetch_changelogs.py` | Bulk changelog via Jira REST | Yes |
-| `scripts/sprint_metrics.py` | Metrics, deltas, themes, aging (requires `--changelogs`) | Yes |
-| `assets/teams-card*.json` | Teams Adaptive Cards | Yes |
+| `scripts/sprint_metrics.py` | Metrics, deltas, themes, aging, bottleneck (requires `--changelogs`) | Yes |
+| `assets/teams-card.json` | Single Teams Adaptive Card (summary + "Show more data" toggle) | Yes |
 | `jira-config.example.json` | Jira token template | Yes |
+| `team-roster.example.json` | Team roster template | Yes |
+| `team-roster.json` | Team roster (roles for owner suggestions) | Yes |
 | `teams-config.example.json` | Teams webhook template | Yes |
 | `jira-config.json` | Your Jira credentials | **gitignored** |
 | `teams-config.json` | Your Teams webhook | **gitignored** |
@@ -52,6 +55,10 @@ Standard [Agent Skills](https://cursor.com/docs/skills) layout: `SKILL.md`, `scr
 2. `Copy-Item .\jira-config.example.json .\jira-config.json` and fill in `email` + `apiToken`.
 3. Verify: `python .\scripts\fetch_changelogs.py <issues.json> --output .sprint_tmp\changelogs.json`
 
+## Team roster (owner suggestions)
+
+`Copy-Item .\team-roster.example.json .\team-roster.json` (already committed). List testers and the frontend dev; everyone else is treated as full-stack. Used for the report's per-role owner suggestions. See [Team roster setup](SKILL.md#team-roster-setup-for-owner-suggestions) in `SKILL.md`.
+
 ## Teams publishing (optional)
 
-`Copy-Item .\teams-config.example.json .\teams-config.json` and add your Power Automate webhook URL. See [Teams setup](SKILL.md#teams-publish-setup-one-time) in `SKILL.md`.
+`Copy-Item .\teams-config.example.json .\teams-config.json` and add your Power Automate webhook URL. Posts a single Adaptive Card with a summary and a "Show more data" toggle. See [Teams setup](SKILL.md#teams-publish-setup-one-time) in `SKILL.md`.

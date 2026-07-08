@@ -353,113 +353,113 @@ This is the **only** report format. Follow it exactly for every sprint-health ru
 
 **Jira key links:** Render every Jira key as a markdown link: `[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX)`. Base URL derives from the configured `site` in `jira-config.json` (`inhabitiq.atlassian.net`).
 
+**Section order (mirror exactly):** Title + sub-line → dual status → TL;DR → one-line verdict → Top recommendations → Team roster line → What matters most → Sprint goal progress → Progress & burndown → Since yesterday → Bottleneck → Estimation & method notes → footer. Recommendations come **first** (right after the verdict); detailed metrics follow.
+
 ```markdown
-# Sprint Health Report — {sprintName}
+# Sprint Health — {sprintName}
 
-| | |
-|-|-|
-| **Date** | {YYYY-MM-DD} |
-| **Project / Board** | SCL / 231 (The A Team) |
-| **Sprint** | {sprintName} ({startDate} → {endDate}) |
-| **Days remaining** | {daysRemaining} (day {daysElapsed} of {sprintLength}) |
-| **Scope** | {scope line — see below} |
-| **Overall status** | {🟢 On track / 🟡 At risk / 🔴 Off track} |
-| **Sprint goal** | {🟢 On track / 🟡 At risk / 🔴 Off track} **for goal** |
+{YYYY-MM-DD} · **{daysElapsed} / {sprintLength} working days** ({daysRemaining} left) · live data from Jira (sprint {activeSprintId})
 
-> {one-line RAG justification — burndown gap, WIP concentration, flow blockers, goal themes off track}
+**Overall: {🟢 On track / 🟡 At risk / 🔴 Off track}** · **Sprint goal: {🟢 On track / 🟡 At risk / 🔴 Off track}**
 
-**Scope line variants:**
+> **TL;DR — read this first.** {2–4 sentence narrative: what changed since the previous report, net SP flow over the last day(s), how the burndown gap moved, where work is piling up (dev vs review vs QA), and which goal themes are stuck. Bold the key numbers. Link the pivotal ticket(s).}
 
-| Test mode | Scope line text |
-|-----------|-----------------|
-| Skip (default) | `Tests not fetched (skipped)` |
-| Show | `Test issues excluded — {testExcludedCount} tickets, {testExcludedSP} SP` |
-| Include | `Tests included in SP metrics` |
+**One-line verdict:** {single sentence naming the core problem and its consequence if unaddressed.}
 
----
+## ✅ Top recommendations (do these today)
 
-## Sprint Goal & Progress
+| # | Prio | Action | Suggested owners (by role) |
+|---|------|--------|----------------------------|
+| 1 | {🔴/🟡/🟢} | {highest-impact action, bolded lead-in + specifics with linked keys} | {roster-based owners with role, or "Whole team — ..."} |
+| 2 | ... | ... | ... |
 
-{explicit goal as numbered/bulleted list OR inferred goal prefixed with *(inferred)*}
+(Max 5 rows, ordered by priority. Owners come from `team-roster.json`: Testers, Frontend, or Full-stack — see roster resolution in SKILL.md Step 0b. If no roster is configured, drop this column.)
 
-| Goal theme | Linked work | Total SP | Done SP | % done | Verdict |
-|-----------|-------------|----------|---------|--------|---------|
-| {theme1} | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX), ...} | {themeTotalSP} | {themeDoneSP} | {themePct}% | {🟢/🟡/🔴 short note} |
-| {theme2} | ... | ... | ... | ... | ... |
+**Team roster used for suggestions** — Testers: {tester names} · Frontend: {frontend names} · Full-stack devs: all other contributors ({dev names seen in scope}). {If a current assignee is outside the roster, add: "{name} shown as current assignee only (outside the roster used for suggestions)."}
 
-**Goal roll-up:** {goalDoneSP} of {goalTotalSP} SP done ≈ **{goalPctComplete}%** vs **{expectedPct}%** expected for elapsed time → **{🟢/🟡/🔴 overall goal verdict}**. {one sentence on which themes are dragging.}
+### What matters most
+
+- {key fact 1 — e.g. "N working days, zero completions — Done SP flat at X."}
+- {key fact 2 — e.g. bottleneck location}
+- {key fact 3 — e.g. QA concentration on one person}
+- {3–6 bullets total; bold the lead-in of each.}
 
 ---
 
-## Progress Summary
+## 🎯 Sprint goal progress
 
-| Metric | Value |
-|--------|-------|
-| Total SP | {totalSP} |
-| Done SP | {doneSP} ({pctComplete}%) |
-| In Progress SP | {inProgressSP} ({ipPct}%){flag if >40%: ⚠️} |
-| To Do SP | {toDoSP} ({todoPct}%) |
-| Issues | {issueCount} (Done {doneCount} / In Progress {ipCount} / To Do {todoCount}) |
-| Unestimated issues | {unestimatedCount} |
-| Tests | {scope line or show-mode: {testExcludedCount} tickets, {testExcludedSP} SP ({testDoneCount} Done, informational)} |
+Goal (Jira): {explicit goal text OR inferred goal prefixed with *(inferred)*}.
 
-### Burndown
+Roll-up: **{goalDoneSP} / {goalTotalSP} SP (~{goalPctComplete}%)** vs **{expectedPct}% expected** → {🟢/🟡/🔴 overall goal verdict} (worst theme sets the verdict).
 
-| | SP |
-|-|-----|
-| Ideal remaining | {idealRemaining} |
-| Actual remaining | {actualRemaining} |
-| Delta (actual − ideal) | {burndownDelta} ({burndownDeltaPct}% behind/ahead) |
-| Expected completion | {expectedComplete}% |
-| Actual completion | {actualComplete}% |
-| Completion gap | {completionGap}% |
+| Theme | Linked work | SP | % | Status |
+|-------|-------------|----|----|--------|
+| {theme1} | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX), ...} | {themeDoneSP} / {themeTotalSP} | {themePct}% | {🟢/🟡/🔴 label} |
+| {theme2} | ... | ... | ... | ... |
 
 ---
 
-## Since Yesterday
+## 📊 Progress & burndown
 
-{opening sentence: net assessment of the day — flat, forward, or regressive}
+| Metric | Value | Note |
+|--------|-------|------|
+| Total | {totalSP} SP · {issueCount} issues | — |
+| ✅ Done | {doneSP} SP ({pctComplete}%) · {doneCount} | vs {expectedPct}% expected → {±completionGap} pp |
+| 🔄 In Progress (category) | {inProgressSP} SP ({ipPct}%) · {ipCount} | {⚠️ WIP > 40% if ipPct>40 — }incl. In-Review & QA |
+| 📋 To Do | {toDoSP} SP ({todoPct}%) · {todoCount} | — |
+| Burndown | {actualRemaining} vs ideal {idealRemaining} SP | {±burndownDelta} SP ({±burndownDeltaPct}%) {behind/ahead}{, vs prior report if known} |
+| Unestimated | {unestimatedCount} issues | e.g. {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX)} {status} at 0 SP |
 
-| Category | Details |
-|----------|---------|
-| ✅ Completed ({count}, {spCompleted} SP) | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX): summary (SP), ...} |
-| ▶ Moved forward | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX): summary — e.g. → QA, → In-Review, started (SP)} |
-| ↩ Sent back from review/QA | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) + SP from deltas.sent_back, or "None"} |
-| ◀ Moved backward / reopened | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) + SP from deltas.regressed, or "None"} |
-| ➕ Scope added to sprint | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX): summary (+SP), ... or "None"} |
-| ➖ Scope removed | {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) + SP from deltas.scope_removed, or "None"} |
-| **Net flow** | +{spCompleted} SP done vs ~{spSentBack} SP sent back vs ~{spRegressed} SP regressed → {assessment} |
-
----
-
-## Aging / Stuck Tickets
-
-{one-sentence bottleneck diagnosis — e.g. "N of M In-Progress items idle ≥2 business days, mostly in In-Review/QA since sprint start."}
-
-| Key | Summary | SP | Status | Idle since |
-|-----|---------|-----|--------|-----------|
-| [SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) | {summary truncated} | {sp or —} | {status name} | {date or "Jul 2"} |
-
-{if no flagged issues: "No aging issues detected."}
+**Scope line (Tests):** Skip (default) → omit or "Tests not fetched (skipped)"; Show → "{testExcludedCount} tickets, {testExcludedSP} SP ({testDoneCount} Done, informational)"; Include → "Tests included in SP metrics". Reflect this in the Estimation & method notes "Excluded" bullet.
 
 ---
 
-## Estimation Notes
+## 🧊 Since yesterday ({prevReportDate})
 
-- **Unestimated:** {unestimatedCount} issues in committed scope — list linked keys (`[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX)`) if ≤5, else count + examples.
-- **Mid-sprint changes:** {midSprintChanges count and linked keys, or "None"}.
-- **Calibration:** {doneCount analyzed, under/over counts}
-{if To Do re-estimates requested: include proposals from parser todo_reestimates}
+**Net flow: {spCompleted} SP completed, {startedCount} advanced, {regressedCount} regression(s) → {assessment — e.g. "the board did not move forward"}.**
+
+- **✅ Completed:** {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX): summary (SP), ... or "none" (flag 🔴 if 0 with >50% elapsed)}.
+- **▶ Moved forward:** {list or "none"}.
+- **↩ Sent back from review/QA:** {list from deltas.sent_back, or "none"}.
+- **◀ Moved backward / reopened:** {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) summary reverted {from}→{to} (SP, author), or "none"}.
+- **Scope added / removed:** {list or "none"}.
 
 ---
 
-## Recommendations
+## ⛔ Bottleneck — where the work actually is
 
-1. {Highest priority — usually clear review/QA queue or rescue off-track goal theme}
-2. {Second — WIP limits, goal rescue, estimation}
-3. {Third}
-4. {Fourth}
-5. {Fifth — max 5 total}
+The {ipCount} tickets in the "In Progress" **category** are not all being worked on. Split by real status (from parser `bottleneck`):
+
+- **{in_progress_dev.count} In-Progress** — dev actively coding
+- **{in_review.count} In-Review** — waiting on reviewer
+- **{qa.count} QA** — waiting on tester
+
+{1–2 sentences: the bottleneck is the {in_review.count + qa.count} tickets in review + QA, not the {in_progress_dev.count} being coded; {stale_count} have had no status change since {idle dates}; causes — most In-Review tickets have no reviewer ({len(unassigned_in_review)} unassigned), and the QA queue is concentrated on {top qa_by_assignee name}.}
+
+**In-Progress (dev) — {in_progress_dev.count} tickets:** {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) (SP, assignee), ...}.
+
+### Longest-waiting review / QA tickets (no status change since {idle dates})
+
+| Key | Summary | SP | Queue | Assignee | Idle since |
+|-----|---------|----|-------|----------|-----------|
+| [SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) | {summary} | {sp} | {In-Review / QA} | {assignee or Unassigned} | {Mon D} |
+
+(Rows from `bottleneck.waiting`, longest-idle first; include the aging/stale ones. Format `idle_since` ISO date as "Mon D".)
+
+**QA load concentration — {assignee} ({sp} SP / {count} tickets):** {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX) (SP), ...}. {From the top `bottleneck.qa_by_assignee` row when one assignee holds a disproportionate share.}
+
+---
+
+## 📐 Estimation & method notes
+
+- **Unestimated:** {unestimatedCount} issues in scope; the one distorting burndown is {[SCL-XXX](https://inhabitiq.atlassian.net/browse/SCL-XXX)} ({status}, 0 SP, {assignee}). {Note the rest, e.g. archived stubs / closed items.}
+- **Mid-sprint SP changes:** {list from deltas.sp_changes, or "none detected in the changelog"}.
+- **Progress basis:** {sprintLength} working days (weekends excluded); expected = {daysElapsed}/{sprintLength} = {expectedPct}%, ideal remaining = {totalSP} × {daysRemaining}/{sprintLength}.
+- **Excluded from SP metrics:** Zephyr Test issues — {testExcludedCount} tickets, {testExcludedSP} SP ({testDoneCount} Done, informational). {Or the active scope-line variant.}
+- **"In Progress" counts:** the Progress table uses the Jira status *category* ({ipCount} issues / {inProgressSP} SP, incl. In-Review & QA). Only **{in_progress_dev.count}** issues are in the actual **In-Progress** status — see the bottleneck breakdown.
+- **Overall verdict:** {RAG justification per the matrix — cite burndown %, SP completed in last 2 business days, WIP %, critical aging}.
+
+{If To Do re-estimates were requested (Step 5b.3): add a **To Do re-estimates** bullet/table from parser `todo_reestimates`.}
 
 ---
 
